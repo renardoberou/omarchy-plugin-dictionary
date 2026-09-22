@@ -14,7 +14,7 @@ Item {
   readonly property string watcherPath: helperDir + "/omarchy-dict-watch"
 
   property bool active: false
-  property var lookup: ({ query: "", raw: "", found: false, error: "", x: 0, y: 0 })
+  property var lookup: ({ query: "", entries: [], found: false, error: "", x: 0, y: 0 })
   // Bumped on every accepted lookup so Overlay.qml's auto-dismiss timer can
   // tell "a new lookup arrived" apart from "the same lookup re-rendered".
   property int lookupSeq: 0
@@ -30,7 +30,7 @@ Item {
 
   onActiveChanged: {
     if (!root.active) {
-      root.lookup = { query: "", raw: "", found: false, error: "", x: 0, y: 0 }
+      root.lookup = { query: "", entries: [], found: false, error: "", x: 0, y: 0 }
     }
   }
 

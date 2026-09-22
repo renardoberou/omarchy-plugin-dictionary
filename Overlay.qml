@@ -19,8 +19,7 @@ Item {
   property var bar: null
 
   readonly property var svc: bar && bar.shell ? bar.shell.serviceFor("renardoberou.dictionary") : null
-  readonly property var lookup: svc ? svc.lookup : ({ query: "", raw: "", found: false, error: "", x: 0, y: 0 })
-  readonly property var entries: Model.parseSdcvOutput(lookup.raw)
+  readonly property var lookup: svc ? svc.lookup : ({ query: "", entries: [], found: false, error: "", x: 0, y: 0 })
 
   property bool cardVisible: false
 
@@ -130,7 +129,7 @@ Item {
         }
 
         Repeater {
-          model: root.lookup.found ? root.entries : []
+          model: root.lookup.found ? root.lookup.entries : []
 
           delegate: Column {
             required property var modelData

@@ -19,7 +19,7 @@ leaving what you're doing to open a browser tab.
   buffer populated by plain mouse-drag highlighting, not `Ctrl+C`. Every
   change that passes a couple of sanity guards (not empty, not longer than
   64 characters — a highlighted paragraph isn't a lookup) runs an offline
-  `sdcv` query and streams the result to the shell.
+  `sdcv --json-output` query and streams the result to the shell.
 - **Card:** appears near where you made the selection, shows the query,
   each matching dictionary's entry, and auto-dismisses after ~6s (or
   sooner if you select something else). It is deliberately **click-through**
@@ -44,6 +44,9 @@ yay -S sdcv stardict-wikt-en-all
 Until both are installed, the card will say "No offline dictionary
 installed" instead of failing silently or doing nothing.
 
+Both are installed and confirmed working on this machine — `sdcv -l`
+reports `wikt-en-ALL-2025-10-05` with 8,034,714 words.
+
 ## Structure
 
 ```
@@ -51,8 +54,8 @@ manifest.json           schema + three entry points (service, bar-widget, overla
 Service.qml               headless: toggle state, owns the watcher process
 BarWidget.qml              bar pill toggle
 Overlay.qml                 click-through popup card, auto-positions + auto-dismisses
-Model.js                    pure: JSON line parsing, sdcv text-output parsing
-bin/omarchy-dict-watch  wl-paste --primary --watch -> guards -> sdcv -> JSON
+Model.js                    pure: JSON line parsing, HTML-entity decoding
+bin/omarchy-dict-watch  wl-paste --primary --watch <this script> --handle -> guards -> sdcv --json-output -> JSON
 ```
 
 ## Install / remove
@@ -75,11 +78,23 @@ journalctl --user -t omarchy-shell --since "1 minute ago" | grep dict
 Test the pipeline without touching a mouse at all — `wl-copy --primary`
 sets the exact same selection slot a manual highlight would:
 ```
-./bin/omarchy-dict-watch    # in one terminal
-wl-copy --primary "hello"   # in another — watch the first terminal for a JSON line
+./bin/omarchy-dict-watch > /tmp/dict.out 2>&1 &   # in the background
+wl-copy --primary "hello"                         # another terminal
+cat /tmp/dict.out                                  # a real definition, JSON
 ```
+Confirmed live on this machine, both a hit and a miss, plus the
+over-length guard correctly suppressing a long selection.
 
-`node -e "require('./Model.js').parseSdcvOutput('...')"` exercises the
+**Implementation note, if you're editing this script:** `wl-paste --watch
+<command>` re-execs `<command>` once per selection change with the new
+content on stdin — it does *not* behave like a continuous pipe source.
+Piping its output into a `while read` loop silently drops every event
+(verified live: works with a plain redirect, produces nothing through a
+loop). That's why this script has a `--handle` mode that `--watch` invokes
+directly per-event, matching the pattern Omarchy's own first-party
+`plugins/clipboard/capture.sh` already uses — don't reintroduce the loop.
+
+`node -e "require('./Model.js').parseLookupLine('...')"` exercises the
 pure parsing logic without touching sdcv, wl-paste, or the shell at all.
 
 ## Known limits
@@ -94,7 +109,3 @@ pure parsing logic without touching sdcv, wl-paste, or the shell at all.
   That's a platform gap, not a bug here.
 - **English only, single dictionary in v1.** No language or dictionary
   picker yet.
-- `Model.parseSdcvOutput` was written against sdcv's documented output
-  shape, not a live sample on this machine (sdcv wasn't installed at
-  authoring time) — re-verify against real output once installed and
-  adjust the parser if the format differs.
