@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# omarchy-dict-watch — watches the Wayland primary selection (plain
+# highlighting, no Ctrl+C needed) and, for anything that passes a few
+# sanity guards, runs an offline sdcv lookup and emits one JSON line per
+# result to stdout for Service.qml to consume.
+#
+# NOTE on sdcv invocation: this uses the plain `sdcv "<word>"` one-shot
+# form (sdcv only drops into its interactive REPL when given *no* word
+# argument at all, so a word argument is already non-interactive). This
+# was written without a live `sdcv --help` check on this machine at
+# authoring time — run `sdcv --help` once sdcv is installed and adjust
+# below if its actual flags differ from this assumption.
+set -uo pipefail
+
+MAX_LEN=64  # a highlighted paragraph is not a dictionary lookup
+
+log() { printf '%s\n' "$*" >&2; }  # stderr only — stdout is the JSON stream
+
+if ! command -v sdcv >/dev/null 2>&1; then
+  log "sdcv not found on PATH"
+  while true; do
+    printf '%s\n' '{"error":"no-dictionary"}'
+    sleep 3600 &
+    wait $!
+  done
+fi
+
+# Detect "no dictionary database installed" once at startup, not per
+# lookup — `sdcv -l` lists installed dictionaries; empty output means sdcv
+# itself works but has nothing to search.
+dict_count="$(sdcv -l 2>/dev/null | grep -c . || true)"
+if [[ "${dict_count:-0}" -eq 0 ]]; then
+  log "sdcv installed but no dictionary databases found (sdcv -l was empty)"
+  while true; do
+    printf '%s\n' '{"error":"no-dictionary"}'
+    sleep 3600 &
+    wait $!
+  done
+fi
+
+wl-paste --primary --watch cat 2>/dev/null | while IFS= read -r text; do
+  # guard: empty / pure-whitespace
+  trimmed="$(printf '%s' "$text" | tr -d '[:space:]')"
+  [[ -n "$trimmed" ]] || continue
+
+  # guard: a highlighted paragraph, not a lookup
+  [[ ${#text} -le $MAX_LEN ]] || continue
+
+  # collapse internal whitespace/newlines into a single-line query
+  query="$(printf '%s' "$text" | tr -s '[:space:]' ' ' | sed -e 's/^ //' -e 's/ $//')"
+  [[ -n "$query" ]] || continue
+
+  pos="$(hyprctl cursorpos 2>/dev/null)"
+  x="${pos%%,*}"
+  y="${pos##*, }"
+  x="${x:-0}"
+  y="${y:-0}"
+
+  raw="$(sdcv "$query" 2>/dev/null)"
+  found=0
+  if [[ -n "$raw" && "$raw" != *"Nothing similar"* ]]; then
+    found=1
+  fi
+
+  jq -nc --arg q "$query" --arg raw "$raw" --argjson found "$found" \
+        --argjson x "$x" --argjson y "$y" \
+        '{query:$q, raw:$raw, found:($found==1), x:$x, y:$y}'
+done
