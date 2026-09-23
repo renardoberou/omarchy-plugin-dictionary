@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Exercises bin/omarchy-dict-watch's trigger guards and lookup ladder through
+# Exercises bin/omarchy-gloss's trigger guards and lookup ladder through
 # its real --handle path (what wl-paste --watch runs per selection change).
 # Needs sdcv and stardict-wikt-en-all; skips otherwise. Touches no shell state.
 set -uo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
-w="$here/../bin/omarchy-dict-watch"
+w="$here/../bin/omarchy-gloss"
 command -v sdcv >/dev/null && [[ -n "$(sdcv -l 2>/dev/null | tail -n +2)" ]] || { echo "skip: no sdcv dictionary"; exit 0; }
-export OMARCHY_DICT_RUNTIME="$(mktemp -d)"
+export OMARCHY_GLOSS_RUNTIME="$(mktemp -d)"
 fail=0
 check() { if eval "$2"; then echo "ok   - $1"; else echo "FAIL - $1"; fail=1; fi; }
 # Tests that write to the REAL primary selection must not pop cards on the
@@ -15,24 +15,24 @@ check() { if eval "$2"; then echo "ok   - $1"; else echo "FAIL - $1"; fail=1; fi
 paused=""; saved_sel=""
 pause_auto() {
   saved_sel="$(wl-paste --primary --no-newline --type text 2>/dev/null)"
-  if [[ "$(omarchy-shell renardoberou.dictionary status 2>/dev/null | jq -r '.active // false' 2>/dev/null)" == true ]]; then
+  if [[ "$(omarchy-shell renardoberou.gloss status 2>/dev/null | jq -r '.active // false' 2>/dev/null)" == true ]]; then
     paused=1
-    omarchy-shell -q renardoberou.dictionary off >/dev/null
+    omarchy-shell -q renardoberou.gloss off >/dev/null
   fi
   local i
   for (( i = 0; i < 30; i++ )); do
-    pgrep -f 'wl-paste --primary --type text --watch .*omarchy-dict-watch' >/dev/null || break
+    pgrep -f 'wl-paste --primary --type text --watch .*omarchy-gloss' >/dev/null || break
     sleep 0.1
   done
 }
 resume_auto() {
   if [[ -n "$saved_sel" ]]; then printf '%s' "$saved_sel" | wl-copy --primary; else wl-copy --primary --clear; fi
   sleep 0.5
-  if [[ -n "$paused" ]]; then paused=""; omarchy-shell -q renardoberou.dictionary on >/dev/null; fi
+  if [[ -n "$paused" ]]; then paused=""; omarchy-shell -q renardoberou.gloss on >/dev/null; fi
 }
-trap 'resume_auto 2>/dev/null; rm -rf "$OMARCHY_DICT_RUNTIME"' EXIT
+trap 'resume_auto 2>/dev/null; rm -rf "$OMARCHY_GLOSS_RUNTIME"' EXIT
 
-handle() { printf '%s' "$1" | DICT_WATCH_STARTED=0 OMARCHY_DICT_DENY_CLASSES="${DENY:-no-such-window-class}" "$w" --handle; }
+handle() { printf '%s' "$1" | GLOSS_WATCH_STARTED=0 OMARCHY_GLOSS_DENY_CLASSES="${DENY:-no-such-window-class}" "$w" --handle; }
 
 for s in "https://example.com/a" "rm -rf /tmp/x" "hunter2" "The quick brown fox jumps" "a" "" "   " "foo@bar.com" "v0.2.0"; do
   check "ignored: '$s'" "[[ -z \"\$(handle \"$s\")\" ]]"
@@ -47,7 +47,7 @@ check "inflection follows to lemma" "handle went | jq -e '.lemma.word == \"go\"'
 check "miss has suggestions, no entries" \
   "handle serendipty | jq -e '(.found | not) and (.entries | length == 0) and (.suggestions | index(\"serendipity\"))' >/dev/null"
 check "startup grace skips the old selection" \
-  "[[ -z \"\$(printf quixotic | DICT_WATCH_STARTED=\${EPOCHREALTIME/./} \"$w\" --handle)\" ]]"
+  "[[ -z \"\$(printf quixotic | GLOSS_WATCH_STARTED=\${EPOCHREALTIME/./} \"$w\" --handle)\" ]]"
 check "denied window is skipped" \
   "[[ -z \"\$(DENY=. handle quixotic)\" ]]"
 check "debounce: only the last of a burst" \
@@ -65,7 +65,7 @@ if command -v wl-copy >/dev/null && [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
   check "empty selection shows nothing" \
     "\"$w\" --define | jq -e '.error == \"no-word\"' >/dev/null"
   check "binary on the watcher path is ignored" \
-    "[[ -z \"\$(printf 'ab\x01cd' | DICT_WATCH_STARTED=0 OMARCHY_DICT_DENY_CLASSES=no-such-window-class \"$w\" --handle)\" ]]"
+    "[[ -z \"\$(printf 'ab\x01cd' | GLOSS_WATCH_STARTED=0 OMARCHY_GLOSS_DENY_CLASSES=no-such-window-class \"$w\" --handle)\" ]]"
   resume_auto
 else
   echo "skip - selection tests (no Wayland session)"
@@ -79,7 +79,7 @@ check "explain: remote host refused by default" \
 if curl -s -m 1 "http://${OLLAMA_HOST:-127.0.0.1:11434}/api/tags" | jq -e '.models | length > 0' >/dev/null 2>&1; then
   pause_auto
   check "explain: configured model missing names it" \
-    "OMARCHY_DICT_MODEL=nope:1b \"$w\" --explain 'x y' | jq -e '.error == \"no-model\" and (.message | test(\"nope:1b\"))' >/dev/null"
+    "OMARCHY_GLOSS_MODEL=nope:1b \"$w\" --explain 'x y' | jq -e '.error == \"no-model\" and (.message | test(\"nope:1b\"))' >/dev/null"
   check "explain: streams and finishes with text" \
     "\"$w\" --explain 'break a leg' | tail -1 | jq -e '.kind == \"explain\" and .done and (.text | length > 10)' >/dev/null"
   check "define: a dictionary word never wakes the model" \

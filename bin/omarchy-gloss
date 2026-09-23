@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# omarchy-dict-watch -- offline dictionary lookups for the Dictionary plugin.
+# omarchy-gloss -- offline dictionary lookups and local-model interpretations for Gloss.
 #
 # Modes:
-#   omarchy-dict-watch                 watch the Wayland primary selection
+#   omarchy-gloss                 watch the Wayland primary selection
 #                                      (plain highlighting) and emit one JSON
 #                                      line per accepted selection
-#   omarchy-dict-watch --lookup WORD   look one word up now (IPC / keybinding)
-#   omarchy-dict-watch --selection     look up the current primary selection now
-#   omarchy-dict-watch --define        selection: a word -> dictionary; a phrase,
+#   omarchy-gloss --lookup WORD   look one word up now (IPC / keybinding)
+#   omarchy-gloss --selection     look up the current primary selection now
+#   omarchy-gloss --define        selection: a word -> dictionary; a phrase,
 #                                      sentence or unknown word -> local model
-#   omarchy-dict-watch --explain [TEXT]  local model on TEXT (or the selection)
-#   omarchy-dict-watch --state [on|off]  read / persist the bar toggle
+#   omarchy-gloss --explain [TEXT]  local model on TEXT (or the selection)
+#   omarchy-gloss --state [on|off]  read / persist the bar toggle
 #
 # Output (one line):
 #   {"query","word","via","entries":[{dict,word,definition}],
@@ -31,6 +31,14 @@
 # Omarchy's own clipboard plugin.
 set -uo pipefail
 
+# The plugin was called "Dictionary" (ID renardoberou.dictionary) until
+# v0.4.0: honour the old OMARCHY_DICT_* settings if the new ones aren't set.
+for _v in MODEL ALLOW_REMOTE KEEP_ALIVE DENY_CLASSES RUNTIME; do
+  _o="OMARCHY_DICT_$_v"; _n="OMARCHY_GLOSS_$_v"
+  if [[ -z "${!_n:-}" && -n "${!_o:-}" ]]; then export "$_n=${!_o}"; fi
+done
+unset _v _o _n
+
 MAX_LEN=48          # "ice cream", "hors d'oeuvre" -- not sentences
 MAX_WORDS=2
 DEBOUNCE=0.25       # a mouse drag updates the selection many times
@@ -38,12 +46,12 @@ STARTUP_GRACE_US=700000   # --watch fires once at start with the OLD selection
 
 # Selections in these windows are never looked up (they may be secrets).
 # Case-insensitive match against the focused window's class.
-DENY_CLASSES="${OMARCHY_DICT_DENY_CLASSES:-1password|keepassxc|keepass|bitwarden|pinentry|gcr-prompter|seahorse|kwalletmanager|polkit|enpass|proton-pass|protonpass}"
+DENY_CLASSES="${OMARCHY_GLOSS_DENY_CLASSES:-1password|keepassxc|keepass|bitwarden|pinentry|gcr-prompter|seahorse|kwalletmanager|polkit|enpass|proton-pass|protonpass}"
 
-runtime="${OMARCHY_DICT_RUNTIME:-${XDG_RUNTIME_DIR:-/tmp}/omarchy-dictionary-$UID}"
-state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-dictionary"
+runtime="${OMARCHY_GLOSS_RUNTIME:-${XDG_RUNTIME_DIR:-/tmp}/omarchy-gloss-$UID}"
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-gloss"
 
-log() { printf '[dict] %s\n' "$*" >&2; }  # stderr only -- stdout is the JSON stream
+log() { printf '[gloss] %s\n' "$*" >&2; }  # stderr only -- stdout is the JSON stream
 
 # ---- reading the selection ----------------------------------------------
 
@@ -217,17 +225,17 @@ lookup() {  # $1 query -> JSON line on stdout
   # A phrase with no entry of its own ("premium subscribers"): look up its
   # words one by one, so the card can still say what each part means.
   local parts="[]" part can_explain=false
-  if ! nonempty "$entries" && [[ "$query" == *" "* && -z "${DICT_NO_PARTS:-}" ]]; then
+  if ! nonempty "$entries" && [[ "$query" == *" "* && -z "${GLOSS_NO_PARTS:-}" ]]; then
     local -a pw
     read -r -a pw <<<"$query"
-    parts="$(for part in "${pw[@]}"; do DICT_NO_PARTS=1 lookup "$part"; done | jq -s -c '[.[] | select(.found) | del(.x, .y)]')"
+    parts="$(for part in "${pw[@]}"; do GLOSS_NO_PARTS=1 lookup "$part"; done | jq -s -c '[.[] | select(.found) | del(.x, .y)]')"
     [[ -n "$parts" ]] || parts="[]"
   fi
   # On a miss, tell the card whether the local model could explain it
   # instead (the Define key). Cheap: Ollama answers /api/tags in ~ms.
-  if ! nonempty "$entries" && [[ -z "${DICT_NO_PARTS:-}" ]]; then
+  if ! nonempty "$entries" && [[ -z "${GLOSS_NO_PARTS:-}" ]]; then
     local url; url="$(ollama_url)"
-    if { loopback "$url" || [[ "${OMARCHY_DICT_ALLOW_REMOTE:-}" == 1 ]]; } && [[ -n "$(pick_model "$url")" ]]; then
+    if { loopback "$url" || [[ "${OMARCHY_GLOSS_ALLOW_REMOTE:-}" == 1 ]]; } && [[ -n "$(pick_model "$url")" ]]; then
       can_explain=true
     fi
   fi
@@ -288,7 +296,7 @@ handle_one() {
   is_text "$raw" || return 0
 
   now="${EPOCHREALTIME/./}"
-  started="${DICT_WATCH_STARTED:-0}"
+  started="${GLOSS_WATCH_STARTED:-0}"
   (( now - started >= STARTUP_GRACE_US )) || return 0
 
   query="$(normalize "$raw")"
@@ -313,13 +321,13 @@ handle_one() {
 # Ollama. Output is labelled as an interpretation on the card, never styled
 # as a definition.
 #
-#   OMARCHY_DICT_MODEL         model to use (default: first installed of a
+#   OMARCHY_GLOSS_MODEL         model to use (default: first installed of a
 #                              list of small instruct models)
 #   OLLAMA_HOST                Ollama address (default 127.0.0.1:11434)
-#   OMARCHY_DICT_ALLOW_REMOTE  set to 1 to allow a non-loopback OLLAMA_HOST;
+#   OMARCHY_GLOSS_ALLOW_REMOTE  set to 1 to allow a non-loopback OLLAMA_HOST;
 #                              otherwise highlighted text never leaves the
 #                              machine
-#   OMARCHY_DICT_KEEP_ALIVE    how long Ollama keeps the model loaded (5m)
+#   OMARCHY_GLOSS_KEEP_ALIVE    how long Ollama keeps the model loaded (5m)
 
 MAX_EXPLAIN=1200
 PREFERRED_MODELS="qwen2.5:3b-instruct qwen2.5:3b llama3.2:3b llama3.2 gemma3:4b phi3.5 qwen2.5:1.5b-instruct gemma3:1b llama3.2:1b qwen2.5:7b-instruct qwen2.5:7b llama3.1:8b"
@@ -341,9 +349,9 @@ pick_model() {
   local url="$1" tags m
   tags="$(curl -s -m 1.5 "$url/api/tags" 2>/dev/null)" || return 0
   [[ -n "$tags" ]] || return 0
-  if [[ -n "${OMARCHY_DICT_MODEL:-}" ]]; then
-    jq -e --arg m "$OMARCHY_DICT_MODEL" 'any(.models[]?; .name == $m or .model == $m)' <<<"$tags" >/dev/null 2>&1 &&
-      printf '%s' "$OMARCHY_DICT_MODEL"
+  if [[ -n "${OMARCHY_GLOSS_MODEL:-}" ]]; then
+    jq -e --arg m "$OMARCHY_GLOSS_MODEL" 'any(.models[]?; .name == $m or .model == $m)' <<<"$tags" >/dev/null 2>&1 &&
+      printf '%s' "$OMARCHY_GLOSS_MODEL"
     return 0
   fi
   for m in $PREFERRED_MODELS; do
@@ -365,15 +373,15 @@ explain_error() {  # $1 code, $2 message
 explain() {
   local text="$1" url model system prompt x y pos
   url="$(ollama_url)"
-  if ! loopback "$url" && [[ "${OMARCHY_DICT_ALLOW_REMOTE:-}" != 1 ]]; then
-    explain_error remote-host "OLLAMA_HOST is not on this machine; set OMARCHY_DICT_ALLOW_REMOTE=1 to allow it."
+  if ! loopback "$url" && [[ "${OMARCHY_GLOSS_ALLOW_REMOTE:-}" != 1 ]]; then
+    explain_error remote-host "OLLAMA_HOST is not on this machine; set OMARCHY_GLOSS_ALLOW_REMOTE=1 to allow it."
     return
   fi
   model="$(pick_model "$url")"
   if [[ -z "$model" ]]; then
     if curl -s -m 1.5 "$url/api/tags" >/dev/null 2>&1; then
-      if [[ -n "${OMARCHY_DICT_MODEL:-}" ]]; then
-        explain_error no-model "Model $OMARCHY_DICT_MODEL isn't installed. Try: ollama pull $OMARCHY_DICT_MODEL"
+      if [[ -n "${OMARCHY_GLOSS_MODEL:-}" ]]; then
+        explain_error no-model "Model $OMARCHY_GLOSS_MODEL isn't installed. Try: ollama pull $OMARCHY_GLOSS_MODEL"
       else
         explain_error no-model "Ollama has no chat model. Try: ollama pull qwen2.5:3b-instruct"
       fi
@@ -399,7 +407,7 @@ $text
   jq -nc --arg q "$text" --arg m "$model" --argjson x "$x" --argjson y "$y" \
     '{kind: "explain", query: $q, model: $m, text: "", done: false, x: $x, y: $y}'
 
-  jq -nc --arg m "$model" --arg s "$system" --arg p "$prompt" --arg k "${OMARCHY_DICT_KEEP_ALIVE:-5m}" \
+  jq -nc --arg m "$model" --arg s "$system" --arg p "$prompt" --arg k "${OMARCHY_GLOSS_KEEP_ALIVE:-5m}" \
     '{model: $m, system: $s, prompt: $p, stream: true, keep_alive: $k,
       options: {temperature: 0.2, num_predict: 180}}' |
   curl -sN -m 60 "$url/api/generate" -H 'Content-Type: application/json' --data-binary @- 2>/dev/null |
@@ -472,6 +480,9 @@ case "${1:-}" in
     ;;
   --state)
     mkdir -p "$state_dir"
+    # carry the toggle over from the plugin's old name
+    old_state="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-dictionary/active"
+    [[ -e "$state_dir/active" || ! -e "$old_state" ]] || cp "$old_state" "$state_dir/active"
     case "${2:-}" in
       on|off) printf '%s\n' "$2" > "$state_dir/active" ;;
       *) cat "$state_dir/active" 2>/dev/null || echo off ;;
@@ -488,5 +499,5 @@ if ! have_dictionary; then
   exec sleep infinity
 fi
 
-export DICT_WATCH_STARTED="${EPOCHREALTIME/./}"
+export GLOSS_WATCH_STARTED="${EPOCHREALTIME/./}"
 exec wl-paste --primary --type text --watch "$0" --handle

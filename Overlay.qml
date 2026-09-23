@@ -20,7 +20,7 @@ Item {
   // here, so the card could never appear.
   property var service: null
 
-  readonly property var svc: service || (shell ? shell.serviceFor("renardoberou.dictionary") : null)
+  readonly property var svc: service || (shell ? shell.serviceFor("renardoberou.gloss") : null)
   readonly property var lookup: svc ? svc.lookup : Model.parseLookupLine("")
   readonly property var cardModel: Model.buildCard(lookup, { maxSenses: 6, perSection: 3 })
   readonly property var explanation: svc ? svc.explanation : Model.emptyExplanation()
@@ -69,7 +69,7 @@ Item {
     visible: root.showing || card.opacity > 0.001
     anchors { top: true; bottom: true; left: true; right: true }
     color: "transparent"
-    WlrLayershell.namespace: "omarchy-dictionary"
+    WlrLayershell.namespace: "omarchy-gloss"
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
     exclusionMode: ExclusionMode.Ignore
@@ -119,7 +119,7 @@ Item {
             id: titleText
             textFormat: Text.PlainText
             text: root.explaining
-              ? (Model.explainTitle(root.explanation.query, 60) || "Dictionary")
+              ? (Model.explainTitle(root.explanation.query, 60) || "Gloss")
               : root.cardModel.title
             width: Math.min(implicitWidth, parent.width - noteText.width - parent.spacing)
             elide: Text.ElideRight

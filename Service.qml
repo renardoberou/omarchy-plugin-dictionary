@@ -7,18 +7,18 @@ import "Model.js" as Model
 // state; neither talks to wl-paste or sdcv directly.
 //
 // IPC -- bind these to keys in Hyprland if you like:
-//   omarchy-shell renardoberou.dictionary defineSelection   # word -> dictionary, else local model
-//   omarchy-shell renardoberou.dictionary explainSelection  # always the local model
-//   omarchy-shell renardoberou.dictionary lookupSelection   # dictionary only
-//   omarchy-shell renardoberou.dictionary lookup serendipity
-//   omarchy-shell renardoberou.dictionary toggle            # auto-lookup on highlight
-//   omarchy-shell renardoberou.dictionary status | jq
+//   omarchy-shell renardoberou.gloss defineSelection   # word -> dictionary, else local model
+//   omarchy-shell renardoberou.gloss explainSelection  # always the local model
+//   omarchy-shell renardoberou.gloss lookupSelection   # dictionary only
+//   omarchy-shell renardoberou.gloss lookup serendipity
+//   omarchy-shell renardoberou.gloss toggle            # auto-lookup on highlight
+//   omarchy-shell renardoberou.gloss status | jq
 Item {
   id: root
   property var shell: null
 
   readonly property string helperDir: Qt.resolvedUrl("bin").toString().replace(/^file:\/\//, "")
-  readonly property string watcherPath: helperDir + "/omarchy-dict-watch"
+  readonly property string watcherPath: helperDir + "/omarchy-gloss"
 
   // Auto mode: look up whatever gets highlighted. Persisted across restarts.
   property bool active: false
@@ -123,7 +123,7 @@ Item {
   }
 
   IpcHandler {
-    target: "renardoberou.dictionary"
+    target: "renardoberou.gloss"
     function toggle(): string { root.toggle(); return root.active ? "on" : "off" }
     function on(): string { root.setActive(true); return "on" }
     function off(): string { root.setActive(false); return "off" }

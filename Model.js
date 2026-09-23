@@ -1,4 +1,4 @@
-// Pure logic for the Dictionary plugin: parsing the watcher's JSON lines,
+// Pure logic for Gloss: parsing the watcher's JSON lines,
 // turning raw Wiktionary/StarDict text into readable senses, ranking
 // "did you mean" suggestions, and building the card model the overlay draws.
 // No I/O -- loads in Quickshell and in plain node (`node --test tests/`).
@@ -423,7 +423,7 @@ function buildCard(lookup, opts) {
                suggestions: [], parts: [], hint: "", empty: "", error: "", hidden: 0, source: "" }
   if (!lookup) return card
   if (lookup.error === "no-dictionary") {
-    card.title = "Dictionary"
+    card.title = "Gloss"
     card.error = "No offline dictionary installed — see the plugin README."
     return card
   }

@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "id": "renardoberou.dictionary",
-  "name": "Dictionary",
-  "version": "0.3.0",
+  "id": "renardoberou.gloss",
+  "name": "Gloss",
+  "version": "0.4.0",
   "author": "Bernardo Roustand",
   "license": "MIT",
-  "description": "Offline dictionary with optional local-model interpretations: highlight a word (or press a key) for a clean definition next to the pointer; phrases and sentences are explained by a small model on your machine via Ollama, clearly labelled.",
+  "description": "Highlight a word or phrase anywhere for an explanation beside the pointer: offline dictionary definitions (WordNet, Wiktionary) for words, and, optionally, a small local model (Ollama) for phrases and sentences, clearly labelled.",
   "kinds": [
     "service",
     "bar-widget",
@@ -18,7 +18,7 @@
     "overlay": "Overlay.qml"
   },
   "barWidget": {
-    "displayName": "Dictionary",
+    "displayName": "Gloss",
     "description": "Look up highlighted words offline.",
     "category": "Utilities",
     "allowMultiple": false,

@@ -1,9 +1,15 @@
-# Dictionary
+# Gloss
 
-An offline dictionary for Omarchy. Highlight a word anywhere (or press a key)
-and a definition card appears next to the pointer, on the monitor you're
-using. Highlight a phrase or a sentence and a small local model explains it.
-No browser tab, no cloud.
+![Gloss card: a highlighted word with its definition beside the pointer](preview.png)
+
+A *gloss* is a short explanation written beside a word. Gloss does that for
+anything you highlight in Omarchy: a word gets an offline dictionary
+definition, a phrase or a sentence can be explained by a small model running
+on your own machine. The card appears next to the pointer, on the monitor
+you're using. No browser tab, no cloud.
+
+*Formerly "Dictionary" (`renardoberou.dictionary`); see [Upgrading from
+Dictionary](#upgrading-from-dictionary).*
 
 - **Readable definitions.** Wiktionary's raw markup is rendered into plain
   text: `(lb en obsolete)` becomes "(obsolete)", `(infl of en go  spast)`
@@ -33,7 +39,7 @@ No browser tab, no cloud.
 
 ```bash
 yay -S sdcv stardict-wikt-en-all
-omarchy plugin add https://github.com/renardoberou/omarchy-plugin-dictionary --enable
+omarchy plugin add https://github.com/renardoberou/omarchy-plugin-gloss --enable
 ```
 
 - `sdcv` — the offline dictionary engine.
@@ -51,19 +57,33 @@ When WordNet has a word, its senses are shown ("cat: *Feline mammal usually
 having thick soft fur…*", with synonyms); Wiktionary fills in everything
 WordNet doesn't cover — slang, rare words, other spellings — and supplies
 relations like "simple past of **go**". The card's footer says which
-dictionary answered. Without sudo, the same files can live in
-`~/.stardict/dic/wordnet/` (sdcv reads that folder too).
+dictionary answered. To install it for your user only, put the same files
+in `~/.stardict/dic/wordnet/` (sdcv reads that folder too).
 
 Until a dictionary is installed the card says "No offline dictionary
 installed" instead of failing silently.
 
-## Remove
+## Upgrading from Dictionary
+
+The plugin's ID changed from `renardoberou.dictionary` to `renardoberou.gloss`
+in v0.4.0. Remove the old one and add Gloss:
 
 ```bash
 omarchy plugin remove renardoberou.dictionary
+omarchy plugin add https://github.com/renardoberou/omarchy-plugin-gloss --enable
 ```
 
-Its only state is `~/.local/state/omarchy-dictionary/active` (the toggle);
+Your auto-mode setting carries over, and old `OMARCHY_DICT_*` variables are
+still honoured. Update any keybinding from `renardoberou.dictionary` to
+`renardoberou.gloss`.
+
+## Remove
+
+```bash
+omarchy plugin remove renardoberou.gloss
+```
+
+Its only state is `~/.local/state/omarchy-gloss/active` (the toggle);
 delete that folder too if you want no trace.
 
 ## Keybinding (on demand)
@@ -71,7 +91,7 @@ delete that folder too if you want no trace.
 Add to `~/.config/hypr/bindings.lua`:
 
 ```lua
-o.bind("SUPER + ALT + D", "Define selection", "omarchy-shell renardoberou.dictionary defineSelection")
+o.bind("SUPER + ALT + D", "Define selection", "omarchy-shell renardoberou.gloss defineSelection")
 ```
 
 **Define selection** sends a single word to the dictionary. A phrase, a
@@ -81,12 +101,12 @@ instead (when one is available).
 Other IPC commands:
 
 ```bash
-omarchy-shell renardoberou.dictionary explainSelection   # always the local model
-omarchy-shell renardoberou.dictionary lookupSelection    # dictionary only
-omarchy-shell renardoberou.dictionary explain "ceteris paribus"
-omarchy-shell renardoberou.dictionary lookup serendipity
-omarchy-shell renardoberou.dictionary toggle        # or: on / off
-omarchy-shell renardoberou.dictionary status | jq
+omarchy-shell renardoberou.gloss explainSelection   # always the local model
+omarchy-shell renardoberou.gloss lookupSelection    # dictionary only
+omarchy-shell renardoberou.gloss explain "ceteris paribus"
+omarchy-shell renardoberou.gloss lookup serendipity
+omarchy-shell renardoberou.gloss toggle        # or: on / off
+omarchy-shell renardoberou.gloss status | jq
 ```
 
 ## Local model (optional)
@@ -109,14 +129,14 @@ Settings (environment of the Omarchy shell):
 
 | Variable | Default | |
 |---|---|---|
-| `OMARCHY_DICT_MODEL` | first installed small model | e.g. `llama3.2:3b` |
+| `OMARCHY_GLOSS_MODEL` | first installed small model | e.g. `llama3.2:3b` |
 | `OLLAMA_HOST` | `127.0.0.1:11434` | Ollama's address |
-| `OMARCHY_DICT_ALLOW_REMOTE` | unset | set to `1` to allow a non-local `OLLAMA_HOST` |
-| `OMARCHY_DICT_KEEP_ALIVE` | `5m` | how long Ollama keeps the model loaded |
+| `OMARCHY_GLOSS_ALLOW_REMOTE` | unset | set to `1` to allow a non-local `OLLAMA_HOST` |
+| `OMARCHY_GLOSS_KEEP_ALIVE` | `5m` | how long Ollama keeps the model loaded |
 
 **Your text stays on your machine.** The highlighted text is sent only to the
 Ollama server on this computer; a non-loopback `OLLAMA_HOST` is refused unless
-you set `OMARCHY_DICT_ALLOW_REMOTE=1`.
+you set `OMARCHY_GLOSS_ALLOW_REMOTE=1`.
 
 **It is an interpretation, not a definition.** A 3B model is quick and usually
 right about idioms, jargon and plain-language meaning, but it can be wrong
@@ -136,12 +156,12 @@ punctuation and quotes are stripped. Ignored:
 - intermediate selections while you drag (only the last one is looked up)
 - selections in password managers and prompts: 1Password, KeePassXC,
   Bitwarden, Proton Pass, Enpass, pinentry, GNOME/KDE keyring prompts, polkit.
-  Extend the list with `OMARCHY_DICT_DENY_CLASSES` (a regex matched against the
+  Extend the list with `OMARCHY_GLOSS_DENY_CLASSES` (a regex matched against the
   focused window's class) in the shell's environment.
 
 Both auto mode and the keybinding read Wayland's primary selection, which is
 filled by the app you select in. A few apps don't fill it; highlighting there
-does nothing (use `omarchy-shell renardoberou.dictionary lookup <word>`).
+does nothing (use `omarchy-shell renardoberou.gloss lookup <word>`).
 Full-screen terminal programs that capture the mouse (editors, TUIs) only
 fill it when you hold Shift while selecting.
 
@@ -170,7 +190,7 @@ Service.qml             toggle (persisted), watcher process, one-shot lookups, I
 BarWidget.qml           bar toggle (α)
 Overlay.qml             click-through card: placement, cap, dismiss
 Model.js                pure: markup rendering, English sections, suggestions, card model
-bin/omarchy-dict-watch  selection watcher, trigger guards, lookup ladder, form-of following,
+bin/omarchy-gloss  selection watcher, trigger guards, lookup ladder, form-of following,
                         local-model interpretation (Ollama, streamed)
 tests/                  node unit tests (real samples), watcher guard tests
 ```
@@ -179,12 +199,12 @@ tests/                  node unit tests (real samples), watcher guard tests
 
 ```bash
 omarchy plugin validate .
-ln -sfn "$PWD" ~/.config/omarchy/plugins/renardoberou.dictionary
-omarchy plugin enable renardoberou.dictionary
+ln -sfn "$PWD" ~/.config/omarchy/plugins/renardoberou.gloss
+omarchy plugin enable renardoberou.gloss
 omarchy restart shell          # edits in a symlinked checkout need a restart
 node --test tests/*.test.js
 ./tests/watch.test.sh
-./bin/omarchy-dict-watch --lookup went | jq
+./bin/omarchy-gloss --lookup went | jq
 ```
 
 `wl-paste --watch <command>` re-executes `<command>` once per selection change
