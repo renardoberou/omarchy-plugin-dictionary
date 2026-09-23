@@ -1,59 +1,54 @@
 import QtQuick
 import Quickshell
-import Quickshell.Hyprland
 import Quickshell.Wayland
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
 
-// Click-through, always-on-top card that pops up near the cursor when a
-// lookup arrives, and auto-dismisses. Same layer-shell technique as
-// omarchy-keycaps/Panel.qml: an empty `mask` makes the whole full-screen
-// window pass every input event through to whatever's underneath, so
-// this can never be clicked, dragged, or focused -- only looked at.
+// Click-through, always-on-top definition card. It appears on the monitor
+// the pointer is on, next to the pointer, and dismisses itself after a time
+// that scales with how much there is to read. Same layer-shell technique as
+// omarchy-keycaps: an empty `mask` passes every input event through, so the
+// card can never steal a click or focus -- only be looked at.
 Item {
   id: root
 
   property var shell: null
   property var manifest: null
-  property var bar: null
+  // The shell hands overlays their plugin's service directly (and a scoped
+  // `shell`), never a `bar` -- v0.1 read `bar.shell`, which is always null
+  // here, so the card could never appear.
+  property var service: null
 
-  readonly property var svc: bar && bar.shell ? bar.shell.serviceFor("renardoberou.dictionary") : null
-  readonly property var lookup: svc ? svc.lookup : ({ query: "", entries: [], found: false, error: "", x: 0, y: 0 })
+  readonly property var svc: service || (shell ? shell.serviceFor("renardoberou.dictionary") : null)
+  readonly property var lookup: svc ? svc.lookup : Model.parseLookupLine("")
+  readonly property var cardModel: Model.buildCard(lookup, { maxSenses: 6, perSection: 3 })
+  readonly property string dictName: lookup.entries.length ? lookup.entries[0].dict : ""
 
   property bool cardVisible: false
 
   Timer {
     id: dismissTimer
-    interval: 6000
     onTriggered: root.cardVisible = false
   }
 
   Connections {
     target: root.svc
     function onLookupSeqChanged() {
+      dismissTimer.interval = Model.dismissMs(root.cardModel)
       root.cardVisible = true
       dismissTimer.restart()
     }
   }
 
-  onSvcChanged: if (!svc || !svc.active) cardVisible = false
+  // The monitor under the pointer, and the pointer relative to it.
+  readonly property var where: Model.screenAt(Quickshell.screens, lookup.x, lookup.y)
 
-  readonly property var targetScreen: {
-    var monitor = Hyprland.focusedMonitor
-    var name = monitor ? String(monitor.name || "") : ""
-    var screens = Quickshell.screens || []
-    for (var i = 0; i < screens.length; i++) {
-      if (String(screens[i].name || "") === name) return screens[i]
-    }
-    return screens.length > 0 ? screens[0] : null
-  }
-
-  readonly property bool showing: !!(svc && svc.active && cardVisible && Model.hasContent(lookup))
+  readonly property bool showing: cardVisible && Model.hasContent(lookup)
 
   PanelWindow {
     id: panel
-    screen: root.targetScreen
+    screen: root.where.screen
     visible: root.showing || card.opacity > 0.001
     anchors { top: true; bottom: true; left: true; right: true }
     color: "transparent"
@@ -63,21 +58,24 @@ Item {
     exclusionMode: ExclusionMode.Ignore
     mask: Region {}
 
-    readonly property int cardWidth: Style.space(320)
+    readonly property int cardWidth: Math.min(Style.space(360), width - 2 * margin)
     readonly property int margin: Style.space(16)
+    readonly property int gap: Style.space(18)
+    readonly property int maxCardHeight: Math.round(height * 0.45)
 
     Item {
       id: card
       width: panel.cardWidth
-      height: column.implicitHeight + Style.space(20)
+      height: Math.min(column.implicitHeight + Style.space(20), panel.maxCardHeight)
+      clip: true
 
-      // Follow the point the selection was made at, offset down-right,
-      // clamped so the card never runs off the target monitor.
-      x: Math.max(panel.margin, Math.min(root.lookup.x + Style.space(16), panel.width - width - panel.margin))
-      y: Math.max(panel.margin, Math.min(root.lookup.y + Style.space(16), panel.height - height - panel.margin))
+      readonly property var spot: Model.placeCard(root.where.x, root.where.y, width, height,
+                                                  panel.width, panel.height, panel.gap, panel.margin)
+      x: spot.x
+      y: spot.y
 
       opacity: root.showing ? 1.0 : 0.0
-      scale: root.showing ? 1.0 : 0.96
+      scale: root.showing ? 1.0 : 0.97
       Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
       Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
 
@@ -96,22 +94,38 @@ Item {
         width: parent.width - Style.space(28)
         spacing: Style.space(6)
 
-        Text {
-          textFormat: Text.PlainText
-          text: root.lookup.query
+        Row {
           width: parent.width
-          elide: Text.ElideRight
-          color: Color.popups.text
-          font.family: Style.font.family
-          font.pixelSize: Style.font.title
-          font.bold: true
+          spacing: Style.space(8)
+
+          Text {
+            id: titleText
+            textFormat: Text.PlainText
+            text: root.cardModel.title
+            width: Math.min(implicitWidth, parent.width - noteText.width - parent.spacing)
+            elide: Text.ElideRight
+            color: Color.popups.text
+            font.family: Style.font.family
+            font.pixelSize: Style.font.title
+            font.bold: true
+          }
+
+          Text {
+            id: noteText
+            textFormat: Text.PlainText
+            visible: !!root.cardModel.note
+            text: root.cardModel.note
+            anchors.baseline: titleText.baseline
+            color: Qt.darker(Color.popups.text, 1.4)
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+          }
         }
 
         Text {
-          visible: !!root.lookup.error
-          text: root.lookup.error === "no-dictionary"
-            ? "No offline dictionary installed — see README."
-            : root.lookup.error
+          visible: !!root.cardModel.error || !!root.cardModel.empty
+          textFormat: Text.PlainText
+          text: root.cardModel.error || root.cardModel.empty
           width: parent.width
           wrapMode: Text.Wrap
           color: Qt.darker(Color.popups.text, 1.3)
@@ -120,16 +134,31 @@ Item {
         }
 
         Text {
-          visible: !root.lookup.error && !root.lookup.found
-          text: "No definition found."
+          visible: root.cardModel.suggestions.length > 0
+          textFormat: Text.PlainText
+          text: "Did you mean: " + root.cardModel.suggestions.join(", ")
           width: parent.width
-          color: Qt.darker(Color.popups.text, 1.3)
+          wrapMode: Text.Wrap
+          color: Color.accent
           font.family: Style.font.family
           font.pixelSize: Style.font.bodySmall
         }
 
+        // "simple past of go" -- then what "go" means
+        Text {
+          visible: !!root.cardModel.lemmaTitle
+          textFormat: Text.PlainText
+          text: root.cardModel.lemmaTitle
+          width: parent.width
+          wrapMode: Text.Wrap
+          color: Color.accent
+          font.family: Style.font.family
+          font.pixelSize: Style.font.bodySmall
+          font.italic: true
+        }
+
         Repeater {
-          model: root.lookup.found ? root.lookup.entries : []
+          model: root.cardModel.lemmaBlocks.concat(root.cardModel.blocks)
 
           delegate: Column {
             required property var modelData
@@ -137,8 +166,9 @@ Item {
             spacing: Style.space(2)
 
             Text {
+              visible: !!modelData.heading
               textFormat: Text.PlainText
-              text: modelData.dict
+              text: modelData.heading
               width: parent.width
               color: Color.accent
               font.family: Style.font.family
@@ -146,18 +176,34 @@ Item {
               font.bold: true
             }
 
-            Text {
-              textFormat: Text.PlainText
-              text: modelData.text
-              width: parent.width
-              wrapMode: Text.Wrap
-              maximumLineCount: 8
-              elide: Text.ElideRight
-              color: Color.popups.text
-              font.family: Style.font.family
-              font.pixelSize: Style.font.bodySmall
+            Repeater {
+              model: modelData.senses
+              delegate: Text {
+                required property var modelData
+                textFormat: Text.PlainText
+                text: "• " + modelData
+                width: column.width
+                wrapMode: Text.Wrap
+                maximumLineCount: 3
+                elide: Text.ElideRight
+                color: Color.popups.text
+                font.family: Style.font.family
+                font.pixelSize: Style.font.bodySmall
+              }
             }
           }
+        }
+
+        Text {
+          visible: root.cardModel.hidden > 0 || !!root.dictName
+          textFormat: Text.PlainText
+          text: (root.cardModel.hidden > 0 ? "+" + root.cardModel.hidden + " more senses" : "") +
+                (root.cardModel.hidden > 0 && root.dictName ? " · " : "") + root.dictName
+          width: parent.width
+          elide: Text.ElideRight
+          color: Qt.darker(Color.popups.text, 1.6)
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
         }
       }
     }

@@ -10,8 +10,8 @@ BarWidget {
   readonly property var svc: bar && bar.shell ? bar.shell.serviceFor("renardoberou.dictionary") : null
   readonly property bool active: svc ? svc.active : false
   readonly property string tip: active
-    ? "Dictionary — on. Highlight a word anywhere to look it up."
-    : "Dictionary — off. Click to start looking up highlighted words."
+    ? "Dictionary — on. Highlight a word anywhere to look it up. Click to turn off."
+    : "Dictionary — off. Click to look up words as you highlight them."
 
   implicitWidth: pillRow.implicitWidth + Style.space(14)
   implicitHeight: barSize
@@ -24,16 +24,6 @@ BarWidget {
     Text {
       textFormat: Text.PlainText
       text: "󰀫"
-      color: root.active ? (root.bar ? root.bar.urgent : Color.urgent) : root.bar.barForeground
-      font.family: root.bar.fontFamily
-      font.pixelSize: Style.font.body
-      anchors.verticalCenter: parent.verticalCenter
-    }
-
-    Text {
-      textFormat: Text.PlainText
-      text: "Dictionary"
-      visible: !root.bar.vertical
       color: root.active ? (root.bar ? root.bar.urgent : Color.urgent) : root.bar.barForeground
       font.family: root.bar.fontFamily
       font.pixelSize: Style.font.body

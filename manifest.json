@@ -2,15 +2,16 @@
   "schemaVersion": 1,
   "id": "renardoberou.dictionary",
   "name": "Dictionary",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "Bernardo Roustand",
   "license": "MIT",
-  "description": "Toggle on, then highlight any word anywhere to see its definition, offline, via sdcv.",
+  "description": "Offline dictionary: highlight a word anywhere (or press a key) for a clean definition card next to the pointer. Resolves inflections (went -> go), suggests spellings, never shows another word's definition.",
   "kinds": [
     "service",
     "bar-widget",
     "overlay"
   ],
+  "keepLoaded": true,
   "entryPoints": {
     "service": "Service.qml",
     "barWidget": "BarWidget.qml",
@@ -18,7 +19,7 @@
   },
   "barWidget": {
     "displayName": "Dictionary",
-    "description": "Highlight a word to look it up, offline.",
+    "description": "Look up highlighted words offline.",
     "category": "Utilities",
     "allowMultiple": false,
     "defaultSection": "right"
