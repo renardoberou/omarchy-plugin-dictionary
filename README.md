@@ -41,8 +41,18 @@ omarchy plugin add https://github.com/renardoberou/omarchy-plugin-dictionary --e
   entries). **CC BY-SA 3.0**, English Wiktionary contributors, converted by
   [dictinfo.com](https://www.dictinfo.com/). The data is not bundled here.
 
-Any other StarDict dictionary `sdcv` can see also works; results from every
-installed dictionary are shown, first one first.
+**Recommended:** also install WordNet for cleaner English definitions:
+
+```bash
+yay -S stardict-wordnet          # 12 MB; Princeton WordNet, permissive license
+```
+
+When WordNet has a word, its senses are shown ("cat: *Feline mammal usually
+having thick soft fur…*", with synonyms); Wiktionary fills in everything
+WordNet doesn't cover — slang, rare words, other spellings — and supplies
+relations like "simple past of **go**". The card's footer says which
+dictionary answered. Without sudo, the same files can live in
+`~/.stardict/dic/wordnet/` (sdcv reads that folder too).
 
 Until a dictionary is installed the card says "No offline dictionary
 installed" instead of failing silently.
@@ -146,8 +156,8 @@ you switch it on, and auto mode never uses the model.
 
 - **The Wiktionary conversion lemmatises linked words** inside definitions:
   "commonly *keep* as a housepet" (Wiktionary says "kept"). That's baked into
-  the `stardict-wikt-en-all` data. `stardict-wordnet` (AUR) is a cleaner, smaller
-  English source and works alongside it.
+  the `stardict-wikt-en-all` data; with WordNet installed, most everyday words
+  are answered by WordNet instead (199 of 373 words in a 600-word sample).
 - English only for now: other languages' sections are hidden, not translated.
 - Suggestions come from the dictionary's own headword list, so they can
   include words from other languages when no English spelling is close.

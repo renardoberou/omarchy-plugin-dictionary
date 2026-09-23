@@ -172,3 +172,47 @@ test("no model hint when the local model isn't available", () => {
   const lk = sample("premium-subscribers"); lk.canExplain = false
   assert.equal(M.buildCard(lk).hint, "")
 })
+
+// ---- with WordNet installed next to Wiktionary ----
+
+test("WordNet is preferred when it has the word, and credited", () => {
+  const c = card("wn-cat")
+  assert.equal(c.source, "WordNet")
+  assert.match(c.blocks[0].senses[0], /^Feline mammal/)
+  assert.doesNotMatch(JSON.stringify(c), /keep as a housepet/)   // Wiktionary's mangled text
+})
+
+test("WordNet glosses drop examples, braces and bracket lists", () => {
+  const c = card("wn-quixotic")
+  const t = c.blocks.flatMap(b => b.senses.concat(b.synonyms)).join(" | ")
+  assert.match(t, /Not sensible about practical matters; unrealistic\./)
+  assert.doesNotMatch(t, /\{|\}|\[syn:|as quixotic as/)
+})
+
+test("synonyms come from the first shown sense only", () => {
+  const b = card("wn-cat").blocks[0]
+  assert.deepEqual(b.synonyms, ["true cat"])     // not "guy, hombre, bozo" from sense 2
+})
+
+test("went: Wiktionary's relation, WordNet's meaning of go", () => {
+  const c = card("wn-went")
+  assert.equal(c.lemmaTitle, "simple past of go")
+  assert.equal(c.lemmaBlocks[0].heading, "verb")
+  assert.match(c.lemmaBlocks[0].senses[0], /^Change location/)
+})
+
+test("parseWordNet ignores other headwords in the same entry", () => {
+  const raw = "\nwent\n     See {go}\n\ngo\n     v 1: change location; move\n"
+  const secs = M.parseWordNet(raw, "went")
+  assert.equal(secs.length, 0)
+  assert.equal(secs.seeAlso, "go")
+  assert.equal(M.parseWordNet(raw, "go")[0].pos, "verb")
+})
+
+test("in a phrase, a modifier word leads with its adjective sense", () => {
+  const c = card("wn-premium-subscribers")
+  assert.equal(c.parts[0].title, "premium")
+  assert.equal(c.parts[0].blocks[0].heading, "adjective")
+  assert.match(c.parts[0].blocks[0].senses[0], /superior quality/)
+  assert.match(c.source, /WordNet/)
+})

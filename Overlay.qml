@@ -23,7 +23,6 @@ Item {
   readonly property var svc: service || (shell ? shell.serviceFor("renardoberou.dictionary") : null)
   readonly property var lookup: svc ? svc.lookup : Model.parseLookupLine("")
   readonly property var cardModel: Model.buildCard(lookup, { maxSenses: 6, perSection: 3 })
-  readonly property string dictName: lookup.entries.length ? lookup.entries[0].dict : ""
   readonly property var explanation: svc ? svc.explanation : Model.emptyExplanation()
   // Showing the local model's interpretation instead of dictionary senses.
   readonly property bool explaining: explanation.active
@@ -288,14 +287,26 @@ Item {
                 font.pixelSize: Style.font.bodySmall
               }
             }
+
+            Text {
+              visible: !!modelData.synonyms && modelData.synonyms.length > 0
+              textFormat: Text.PlainText
+              text: "also: " + (modelData.synonyms || []).join(", ")
+              width: parent.width
+              elide: Text.ElideRight
+              color: Qt.darker(Color.popups.text, 1.4)
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+              font.italic: true
+            }
           }
         }
 
         Text {
-          visible: !root.explaining && (root.cardModel.hidden > 0 || !!root.dictName)
+          visible: !root.explaining && (root.cardModel.hidden > 0 || !!root.cardModel.source)
           textFormat: Text.PlainText
           text: (root.cardModel.hidden > 0 ? "+" + root.cardModel.hidden + " more senses" : "") +
-                (root.cardModel.hidden > 0 && root.dictName ? " · " : "") + root.dictName
+                (root.cardModel.hidden > 0 && root.cardModel.source ? " · " : "") + root.cardModel.source
           width: parent.width
           elide: Text.ElideRight
           color: Qt.darker(Color.popups.text, 1.6)

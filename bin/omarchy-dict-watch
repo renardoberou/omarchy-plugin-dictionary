@@ -96,11 +96,18 @@ stems() {
   esac
 }
 
+# Wiktionary's entry text (the one with form-of templates). With several
+# dictionaries installed, sdcv lists them in its own order -- WordNet may
+# come first -- so pick by content, not position.
+wikt_text() {
+  jq -r '[.[] | select(.definition | test("\\((?:lb|l|m|senseid|sid|[a-z ]+ of) [a-z]{2,3} "))][0].definition // ""' <<<"$1"
+}
+
 # First "plural of X" / "past tense of X"-style reference in the ENGLISH part
-# of an entry (foreign-language sections start with "Language pos." lines).
-# Prints: relation \t lemma
+# of the Wiktionary entry (foreign-language sections start with "Language
+# pos." lines). Prints the lemma.
 form_of() {
-  jq -r '.[0].definition // ""' <<<"$1" |
+  wikt_text "$1" |
     awk '/^[A-Z][a-z]+( [A-Z][a-z]+)? [a-z.]+\.$/ { exit } { print }' |
     grep -oP '\((plural|infl|inflection|past participle|present participle|simple past|past tense|comparative|superlative|alternative form|alternative spelling|alternative case form|obsolete form|obsolete spelling|archaic form|archaic spelling|misspelling|informal spelling|nonstandard spelling|clipping|clip|abbreviation|abbr|initialism|acronym|ellipsis|synonym|syn) of en \K[^()=]+?(?=  | [a-z]+=|\))' |
     head -1 |
@@ -110,13 +117,18 @@ form_of() {
 # The same, from raw templates the converter left in place:
 # "{{deliberate misspelling of|en|the|addl=...}}" -> the
 form_of_raw() {
-  jq -r '.[0].definition // ""' <<<"$1" | grep -oP '\{\{[a-z ]+ of\|en\|\K[^|}]+' | head -1
+  jq -r '[.[].definition] | join("\n")' <<<"$1" | grep -oP '\{\{[a-z ]+ of\|en\|\K[^|}]+' | head -1
+}
+
+# WordNet's own cross-reference: "went  See {go}".
+form_of_wordnet() {
+  jq -r '[.[] | select(.dict == "WordNet")][0].definition // ""' <<<"$1" | grep -oP '^\s*See \{\K[^}]+' | head -1
 }
 
 # Relation label for the lemma line, e.g. "plural of", "past tense of".
 relation_of() {
   local def="$1" lemma="$2"
-  jq -r '.[0].definition // ""' <<<"$def" |
+  wikt_text "$def" |
     grep -oP "\\((plural|infl|inflection|past participle|present participle|simple past|past tense|comparative|superlative|alternative form|alternative spelling|alternative case form|obsolete form|obsolete spelling|archaic form|archaic spelling|misspelling|informal spelling|nonstandard spelling|clipping|clip|abbreviation|abbr|initialism|acronym|ellipsis|synonym|syn) of en \\Q$lemma\\E[^)]*\\)" |
     head -1
 }
@@ -126,6 +138,8 @@ relation_of() {
 # codes at all is a plain English entry. (Mirrors Model.js parseDefinition.)
 english_like() {
   local def
+  # WordNet is an English dictionary: if it has the word, the word is English.
+  jq -e 'any(.[]; .dict == "WordNet")' <<<"$1" >/dev/null 2>&1 && return 0
   def="$(jq -r '[.[].definition] | join("\n")' <<<"$1")"
   grep -qP '\((?:lb|lbl|l|m|senseid|sid|[a-z ]+ of) en ' <<<"$def" && return 0
   ! grep -qP '\((?:lb|lbl|l|m|senseid|sid) [a-z]{2,3}(?:-[a-z]+)? ' <<<"$def"
@@ -181,12 +195,13 @@ lookup() {  # $1 query -> JSON line on stdout
   if nonempty "$entries"; then
     lemma="$(form_of "$entries")"
     [[ -n "$lemma" ]] || lemma="$(form_of_raw "$entries")"
+    [[ -n "$lemma" ]] || lemma="$(form_of_wordnet "$entries")"
     if [[ -n "$lemma" && "${lemma,,}" != "${word,,}" ]]; then
       local lemma_entries
       lemma_entries="$(exact "$lemma")"
       if nonempty "$lemma_entries"; then
         rel="$(relation_of "$entries" "$lemma")"
-        [[ -n "$rel" ]] || rel="$(jq -r '.[0].definition // ""' <<<"$entries" | grep -oP "\\{\\{[a-z ]+ of\\|en\\|\\Q$lemma\\E[^}]*\\}\\}" | head -1)"
+        [[ -n "$rel" ]] || rel="$(jq -r '[.[].definition] | join("\n")' <<<"$entries" | grep -oP "\\{\\{[a-z ]+ of\\|en\\|\\Q$lemma\\E[^}]*\\}\\}" | head -1)"
         lemma_json="$(jq -c --arg w "$lemma" --arg rel "$rel" '{word: $w, relation: $rel, entries: .}' <<<"$lemma_entries")"
       fi
     fi

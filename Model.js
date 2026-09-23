@@ -202,6 +202,86 @@ function parseDefinition(raw) {
   return sections.filter(function(s) { return !s.skip && s.senses.length })
 }
 
+// ---- WordNet ------------------------------------------------------------
+//
+// WordNet (dictd format) is small, English-only and clean:
+//   cat
+//        n 1: feline mammal usually having thick soft fur ...; "example"
+//             [syn: {true cat}]
+//        2: an informal term for a youth or man; "a nice guy" [syn: {guy}]
+//   went
+//        See {go}
+// One entry can hold several headword blocks ("went" also carries "go").
+
+var WN_POS = { "n": "noun", "v": "verb", "adj": "adjective", "adv": "adverb", "s": "adjective" }
+
+function isWordNet(entry) {
+  return /wordnet/i.test(entry.dict || "") || /^\s+(?:n|v|adj|adv|s)\s+(?:\d+\s*)?:\s/m.test(entry.text || "")
+}
+
+function wnClean(text) {
+  var syn = []
+  var t = String(text || "")
+  t = t.replace(/\[syn:\s*([^\]]*)\]/g, function(all, list) {
+    list.replace(/\{([^}]+)\}/g, function(a, w) { syn.push(w.trim()); return a })
+    return ""
+  })
+  t = t.replace(/\[(?:ant|also|pl|v|n|adj|adv)[^\]]*\]/g, "")
+  t = t.replace(/\{([^}]+)\}/g, "$1")
+  // The gloss comes first; usage examples follow as '; "..."'.
+  var cut = t.search(/;\s*"/)
+  if (cut >= 0) t = t.slice(0, cut)
+  t = t.replace(/\s+/g, " ").replace(/[;:,\s]+$/, "").trim()
+  if (t) t = t.charAt(0).toUpperCase() + t.slice(1) + (/[.!?)]$/.test(t) ? "" : ".")
+  return { text: t, synonyms: syn }
+}
+
+// WordNet entry text -> sections for `word` (other headwords in the same
+// entry are ignored), in the same shape parseDefinition returns, plus
+// `synonyms` per section and `seeAlso` for "See {go}" cross-references.
+function parseWordNet(raw, word) {
+  var target = String(word || "").toLowerCase()
+  var blocks = String(raw || "").split(/\n\s*\n/)
+  var sections = []
+  blocks.forEach(function(block) {
+    var lines = block.split("\n").filter(function(l) { return l.trim() })
+    if (!lines.length) return
+    var head = lines[0].trim()
+    if (target && head.toLowerCase() !== target) return
+    // join continuation lines onto the sense they belong to
+    var items = []
+    for (var i = 1; i < lines.length; i++) {
+      var l = lines[i]
+      if (/^\s+(?:(?:n|v|adj|adv|s)\s+)?(?:\d+\s*)?:\s/.test(l) || /^\s+See \{/.test(l) || /^\s+\[also:/.test(l))
+        items.push(l.trim())
+      else if (items.length) items[items.length - 1] += " " + l.trim()
+    }
+    var cur = null
+    items.forEach(function(it) {
+      var see = it.match(/^See \{([^}]+)\}/)
+      if (see) { sections.seeAlso = see[1]; return }
+      if (/^\[also:/.test(it)) return
+      var m = it.match(/^(?:(n|v|adj|adv|s)\s+)?(?:\d+\s*)?:\s*(.*)$/)
+      if (!m) return
+      if (m[1] || !cur) {
+        var pos = WN_POS[m[1]] || (cur ? cur.pos : "")
+        if (!cur || cur.pos !== pos) {
+          cur = { lang: "en", label: "", pos: pos, skip: false, senses: [], synonyms: [] }
+          sections.push(cur)
+        }
+      }
+      var c = wnClean(m[2])
+      if (!c.text) return
+      cur.senses.push(c.text)
+      // Synonyms of the section's FIRST sense only: WordNet lists them per
+      // sense, and "cat -- also: guy, bozo" mixes meanings.
+      if (cur.senses.length === 1)
+        cur.synonyms = c.synonyms.filter(function(w) { return w.toLowerCase() !== target })
+    })
+  })
+  return sections
+}
+
 // English sections; unknown ones if there is no English; foreign last resort.
 function englishFirst(sections) {
   var en = sections.filter(function(s) { return s.lang === "en" })
@@ -340,7 +420,7 @@ function buildCard(lookup, opts) {
   var maxSenses = opts.maxSenses || 6
   var perSection = opts.perSection || 3
   var card = { title: "", note: "", blocks: [], lemmaTitle: "", lemmaBlocks: [],
-               suggestions: [], parts: [], hint: "", empty: "", error: "", hidden: 0 }
+               suggestions: [], parts: [], hint: "", empty: "", error: "", hidden: 0, source: "" }
   if (!lookup) return card
   if (lookup.error === "no-dictionary") {
     card.title = "Dictionary"
@@ -351,10 +431,19 @@ function buildCard(lookup, opts) {
   if (lookup.via === "stem" && lookup.word) card.note = "from “" + lookup.query + "”"
 
   var budget = maxSenses
-  function sectionsOf(entries) {
-    var all = []
-    entries.forEach(function(e) { all = all.concat(parseDefinition(e.text)) })
-    return all
+  var sources = []
+  // WordNet's senses when it has the word (clean English), otherwise the
+  // Wiktionary sections. Records which dictionary answered for the footer.
+  function sectionsOf(entries, word) {
+    var wn = [], wk = [], wkName = ""
+    entries.forEach(function(e) {
+      if (isWordNet(e)) wn = wn.concat(parseWordNet(e.text, e.word || word))
+      else { wk = wk.concat(parseDefinition(e.text)); wkName = wkName || e.dict }
+    })
+    wn = wn.filter(function(x) { return x.senses.length })
+    if (wn.length) { sources.push("WordNet"); return wn }
+    if (wkName) sources.push(wkName)
+    return wk
   }
   function take(sections, limit, dropFormOf) {
     var blocks = []
@@ -366,7 +455,8 @@ function buildCard(lookup, opts) {
       var shown = senses.slice(0, n)
       card.hidden += senses.length - shown.length
       budget -= shown.length; limit -= shown.length
-      if (shown.length) blocks.push({ heading: (s.lang === "foreign" && s.label ? s.label + " " : "") + (s.pos || ""), senses: shown })
+      if (shown.length) blocks.push({ heading: (s.lang === "foreign" && s.label ? s.label + " " : "") + (s.pos || ""),
+                                      senses: shown, synonyms: (s.synonyms || []).slice(0, 4) })
     })
     return blocks
   }
@@ -377,9 +467,12 @@ function buildCard(lookup, opts) {
       // "premium subscribers": no entry for the phrase, so say what each
       // word means -- briefly, the card has to hold all of them.
       card.empty = "No entry for the whole phrase. Its words:"
-      card.parts = parts.map(function(pt) {
-        var c = buildCard(pt, { maxSenses: 2, perSection: 2 })
+      card.parts = parts.map(function(pt, i) {
+        // In "premium subscribers" the first word modifies the second:
+        // its adjective sense is the one meant.
+        var c = buildCard(pt, { maxSenses: 2, perSection: 2, preferPos: i < parts.length - 1 ? "adjective" : "" })
         card.hidden += c.hidden
+        if (c.source) c.source.split(" · ").forEach(function(x) { if (sources.indexOf(x) < 0) sources.push(x) })
         return { title: c.title, note: c.lemmaTitle, blocks: c.lemmaBlocks.concat(c.blocks) }
       })
     } else {
@@ -388,10 +481,11 @@ function buildCard(lookup, opts) {
     }
     if (lookup.canExplain)
       card.hint = "Press your Define key (Super+Alt+D in the README) to have the local model explain it."
+    card.source = sources.join(" · ")
     return card
   }
 
-  var own = sectionsOf(lookup.entries)
+  var own = sectionsOf(lookup.entries, lookup.word)
   if (!hasEnglish(own)) {
     // Exact hit, but only as a word in other languages ("teh"): say so, and
     // offer the English near-misses the watcher collected.
@@ -401,15 +495,21 @@ function buildCard(lookup, opts) {
 
   if (lookup.lemma && lookup.lemma.entries.length) {
     card.lemmaTitle = lookup.lemma.relation || ("see " + lookup.lemma.word)
-    var ls = englishFirst(sectionsOf(lookup.lemma.entries))
+    var ls = englishFirst(sectionsOf(lookup.lemma.entries, lookup.lemma.word))
     var pos = relationPos(card.lemmaTitle)
     var matching = pos ? ls.filter(function(s) { return s.pos === pos }) : []
     card.lemmaBlocks = take(matching.length ? matching : ls, Math.ceil(maxSenses * 2 / 3), false)
     card.blocks = take(englishFirst(own), budget, true)
   } else {
-    card.blocks = take(englishFirst(own), budget, false)
+    var ownEn = englishFirst(own)
+    if (opts.preferPos) {
+      ownEn = ownEn.filter(function(x) { return x.pos === opts.preferPos })
+        .concat(ownEn.filter(function(x) { return x.pos !== opts.preferPos }))
+    }
+    card.blocks = take(ownEn, budget, false)
   }
   if (!card.blocks.length && !card.lemmaBlocks.length) card.empty = "No readable definition in this dictionary."
+  card.source = sources.filter(function(x, i) { return sources.indexOf(x) === i }).join(" · ")
   return card
 }
 
@@ -496,6 +596,8 @@ if (typeof module !== "undefined") {
     renderTemplates: renderTemplates,
     cleanLine: cleanLine,
     parseDefinition: parseDefinition,
+    parseWordNet: parseWordNet,
+    isWordNet: isWordNet,
     relationPos: relationPos,
     editDistance: editDistance,
     rankSuggestions: rankSuggestions,
