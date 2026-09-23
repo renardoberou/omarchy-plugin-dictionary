@@ -404,6 +404,46 @@ function dismissMs(card) {
   return Math.max(4000, Math.min(15000, 3000 + chars * 35))
 }
 
+// ---- model interpretation --------------------------------------------------
+
+function emptyExplanation() {
+  return { active: false, query: "", model: "", text: "", done: false, error: "", message: "", x: 0, y: 0 }
+}
+
+// {"kind":"explain",...} line -> explanation, or null if it isn't one.
+function parseExplainLine(line) {
+  var p
+  try { p = JSON.parse(line) } catch (e) { return null }
+  if (!p || p.kind !== "explain") return null
+  return {
+    active: true,
+    query: typeof p.query === "string" ? p.query : "",
+    model: typeof p.model === "string" ? p.model : "",
+    text: typeof p.text === "string" ? p.text.trim() : "",
+    done: !!p.done || !!p.error,
+    error: typeof p.error === "string" ? p.error : "",
+    message: typeof p.message === "string" ? p.message : "",
+    x: Number(p.x) || 0,
+    y: Number(p.y) || 0
+  }
+}
+
+// Card title for an explained selection: the selection itself, shortened.
+function explainTitle(query, max) {
+  var q = String(query || "").replace(/\s+/g, " ").trim()
+  max = max || 60
+  return q.length > max ? q.slice(0, max - 1).replace(/\s+\S*$/, "") + "…" : q
+}
+
+// "qwen2.5:3b-instruct" -> "qwen2.5 3b"
+function modelLabel(model) {
+  return String(model || "").replace(/:latest$/, "").replace(/-instruct$/, "").replace(":", " ")
+}
+
+function explainDismissMs(ex) {
+  return Math.max(5000, Math.min(20000, 3500 + String(ex && ex.text || "").length * 45))
+}
+
 // ---- screen placement -------------------------------------------------------
 
 // Hyprland reports the cursor in global layout coordinates; each screen
@@ -446,6 +486,11 @@ if (typeof module !== "undefined") {
     buildCard: buildCard,
     dismissMs: dismissMs,
     screenAt: screenAt,
+    emptyExplanation: emptyExplanation,
+    parseExplainLine: parseExplainLine,
+    explainTitle: explainTitle,
+    modelLabel: modelLabel,
+    explainDismissMs: explainDismissMs,
     placeCard: placeCard
   }
 }

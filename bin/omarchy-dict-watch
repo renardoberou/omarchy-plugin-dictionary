@@ -7,6 +7,9 @@
 #                                      line per accepted selection
 #   omarchy-dict-watch --lookup WORD   look one word up now (IPC / keybinding)
 #   omarchy-dict-watch --selection     look up the current primary selection now
+#   omarchy-dict-watch --define        selection: a word -> dictionary; a phrase,
+#                                      sentence or unknown word -> local model
+#   omarchy-dict-watch --explain [TEXT]  local model on TEXT (or the selection)
 #   omarchy-dict-watch --state [on|off]  read / persist the bar toggle
 #
 # Output (one line):
@@ -19,6 +22,8 @@
 #   suggestions: near-miss headwords when nothing matched exactly (the card
 #          shows them as "Did you mean"; they are never shown as definitions)
 # or {"error":"no-dictionary"} when sdcv or a dictionary is missing.
+# Model output is separate: {"kind":"explain","query","model","text","done"},
+# streamed, `text` holding everything so far (see explain() below).
 #
 # Why `wl-paste --watch "$0" --handle` instead of a read loop: --watch re-execs
 # its command once per selection change with the content on stdin; piping it
@@ -248,7 +253,146 @@ handle_one() {
   lookup "$query"
 }
 
+# ---- interpretation by a local model (Ollama) ----------------------------
+#
+# The dictionary handles words. Phrases, idioms, sentences -- and words the
+# dictionary doesn't know -- can be explained by a small local model through
+# Ollama. Output is labelled as an interpretation on the card, never styled
+# as a definition.
+#
+#   OMARCHY_DICT_MODEL         model to use (default: first installed of a
+#                              list of small instruct models)
+#   OLLAMA_HOST                Ollama address (default 127.0.0.1:11434)
+#   OMARCHY_DICT_ALLOW_REMOTE  set to 1 to allow a non-loopback OLLAMA_HOST;
+#                              otherwise highlighted text never leaves the
+#                              machine
+#   OMARCHY_DICT_KEEP_ALIVE    how long Ollama keeps the model loaded (5m)
+
+MAX_EXPLAIN=1200
+PREFERRED_MODELS="qwen2.5:3b-instruct qwen2.5:3b llama3.2:3b llama3.2 gemma3:4b phi3.5 qwen2.5:1.5b-instruct gemma3:1b llama3.2:1b qwen2.5:7b-instruct qwen2.5:7b llama3.1:8b"
+
+ollama_url() {
+  local h="${OLLAMA_HOST:-127.0.0.1:11434}"
+  [[ "$h" == *://* ]] || h="http://$h"
+  printf '%s' "${h%/}"
+}
+
+loopback() {
+  local hostport="${1#*://}"; hostport="${hostport%%/*}"
+  local host="${hostport%:*}"
+  [[ "$host" == "127."* || "$host" == localhost || "$host" == "[::1]" || "$host" == "::1" ]]
+}
+
+# Prints the model name, or nothing if Ollama or a usable model isn't there.
+pick_model() {
+  local url="$1" tags m
+  tags="$(curl -s -m 1.5 "$url/api/tags" 2>/dev/null)" || return 0
+  [[ -n "$tags" ]] || return 0
+  if [[ -n "${OMARCHY_DICT_MODEL:-}" ]]; then
+    jq -e --arg m "$OMARCHY_DICT_MODEL" 'any(.models[]?; .name == $m or .model == $m)' <<<"$tags" >/dev/null 2>&1 &&
+      printf '%s' "$OMARCHY_DICT_MODEL"
+    return 0
+  fi
+  for m in $PREFERRED_MODELS; do
+    if jq -e --arg m "$m" 'any(.models[]?; .name == $m or .name == ($m + ":latest"))' <<<"$tags" >/dev/null 2>&1; then
+      printf '%s' "$m"; return 0
+    fi
+  done
+  # Anything else that isn't an embedding model.
+  jq -r '[.models[]?.name | select(test("embed|bge|minilm|rerank"; "i") | not)][0] // empty' <<<"$tags"
+}
+
+explain_error() {  # $1 code, $2 message
+  jq -nc --arg c "$1" --arg m "$2" '{kind: "explain", error: $c, message: $m}'
+}
+
+# Stream an explanation of $1 as JSON lines:
+#   {"kind":"explain","query","model","text","done","x","y"}
+# `text` is the whole explanation so far (the card just re-renders it).
+explain() {
+  local text="$1" url model system prompt x y pos
+  url="$(ollama_url)"
+  if ! loopback "$url" && [[ "${OMARCHY_DICT_ALLOW_REMOTE:-}" != 1 ]]; then
+    explain_error remote-host "OLLAMA_HOST is not on this machine; set OMARCHY_DICT_ALLOW_REMOTE=1 to allow it."
+    return
+  fi
+  model="$(pick_model "$url")"
+  if [[ -z "$model" ]]; then
+    if curl -s -m 1.5 "$url/api/tags" >/dev/null 2>&1; then
+      if [[ -n "${OMARCHY_DICT_MODEL:-}" ]]; then
+        explain_error no-model "Model $OMARCHY_DICT_MODEL isn't installed. Try: ollama pull $OMARCHY_DICT_MODEL"
+      else
+        explain_error no-model "Ollama has no chat model. Try: ollama pull qwen2.5:3b-instruct"
+      fi
+    else
+      explain_error no-ollama "Local model not available (Ollama isn't running)."
+    fi
+    return
+  fi
+
+  pos="$(hyprctl cursorpos 2>/dev/null)"
+  x="${pos%%,*}"; y="${pos##*, }"
+  [[ "$x" =~ ^-?[0-9]+$ ]] || x=0
+  [[ "$y" =~ ^-?[0-9]+$ ]] || y=0
+
+  system="You explain text someone has highlighted while reading. Reply in English, in at most three short sentences and under 70 words. Say what it means, not what it says. Name idioms, jargon, abbreviations or foreign phrases as such and give their meaning. If it is a single word or name, say what it is. If you are not sure, say so briefly. No preamble, no markdown."
+  prompt="Highlighted text:
+\"\"\"
+$text
+\"\"\""
+
+  # Announce immediately so the card can show "Interpreting…" while the
+  # model loads (a cold start takes a few seconds).
+  jq -nc --arg q "$text" --arg m "$model" --argjson x "$x" --argjson y "$y" \
+    '{kind: "explain", query: $q, model: $m, text: "", done: false, x: $x, y: $y}'
+
+  jq -nc --arg m "$model" --arg s "$system" --arg p "$prompt" --arg k "${OMARCHY_DICT_KEEP_ALIVE:-5m}" \
+    '{model: $m, system: $s, prompt: $p, stream: true, keep_alive: $k,
+      options: {temperature: 0.2, num_predict: 180}}' |
+  curl -sN -m 60 "$url/api/generate" -H 'Content-Type: application/json' --data-binary @- 2>/dev/null |
+  jq -c --unbuffered -n --arg q "$text" --arg m "$model" --argjson x "$x" --argjson y "$y" '
+    foreach (inputs | objects) as $e ({t: "", err: ""};
+      .t += ($e.response // "") | .err = ($e.error // "");
+      {kind: "explain", query: $q, model: $m, text: .t, done: ($e.done // false),
+       x: $x, y: $y} + (if .err != "" then {error: "model-error", message: .err} else {} end))
+  '
+}
+
+# Clean a selection for the model: whitespace collapsed, length capped.
+explain_text() {
+  local t="$1"
+  t="$(printf '%s' "$t" | tr '\r\n\t' '   ' | tr -s ' ' | sed -E 's/^ +//; s/ +$//')"
+  (( ${#t} <= MAX_EXPLAIN )) || t="${t:0:MAX_EXPLAIN}…"
+  printf '%s' "$t"
+}
+
+# "Define selection": a word goes to the dictionary; if the dictionary has
+# nothing -- or the selection is a phrase or a sentence -- the model explains.
+define_selection() {  # $1 = "force-model" to skip the dictionary
+  local raw word out
+  denied_window && { echo '{"error":"denied-window"}'; return; }
+  raw="$(wl-paste --primary --no-newline 2>/dev/null | head -c 8192)"
+  [[ -n "${raw//[[:space:]]/}" ]] || { echo '{"error":"no-word"}'; return; }
+  word="$(normalize "$raw")"
+  if [[ -n "$word" && "${1:-}" != force-model ]] && have_dictionary; then
+    out="$(lookup "$word")"
+    if jq -e '.found' <<<"$out" >/dev/null 2>&1 && english_like "$(jq -c .entries <<<"$out")"; then
+      printf '%s\n' "$out"
+      return
+    fi
+  fi
+  explain "$(explain_text "$raw")"
+}
+
 case "${1:-}" in
+  --define)
+    define_selection
+    exit 0
+    ;;
+  --explain)
+    if [[ -n "${2:-}" ]]; then explain "$(explain_text "$2")"; else define_selection force-model; fi
+    exit 0
+    ;;
   --handle)
     handle_one
     exit 0

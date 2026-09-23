@@ -7,7 +7,9 @@ import "Model.js" as Model
 // state; neither talks to wl-paste or sdcv directly.
 //
 // IPC -- bind these to keys in Hyprland if you like:
-//   omarchy-shell renardoberou.dictionary lookupSelection   # define the highlighted word now
+//   omarchy-shell renardoberou.dictionary defineSelection   # word -> dictionary, else local model
+//   omarchy-shell renardoberou.dictionary explainSelection  # always the local model
+//   omarchy-shell renardoberou.dictionary lookupSelection   # dictionary only
 //   omarchy-shell renardoberou.dictionary lookup serendipity
 //   omarchy-shell renardoberou.dictionary toggle            # auto-lookup on highlight
 //   omarchy-shell renardoberou.dictionary status | jq
@@ -25,6 +27,8 @@ Item {
   // Bumped on every lookup worth showing, so the overlay can tell "a new
   // lookup arrived" from "the same lookup re-rendered".
   property int lookupSeq: 0
+  // The local model's interpretation of the current selection, streamed in.
+  property var explanation: Model.emptyExplanation()
   property string lastError: ""
 
   function setActive(on) {
@@ -36,9 +40,22 @@ Item {
   function toggle() { setActive(!root.active) }
 
   function handleLine(line) {
+    var ex = Model.parseExplainLine(line)
+    if (ex) {
+      // Errors like "Ollama isn't running" are worth a card only when the
+      // user explicitly asked for an interpretation (always the case here).
+      var first = !root.explanation.active || root.explanation.query !== ex.query
+      root.explanation = ex
+      if (first) {
+        root.lookup = Model.parseLookupLine("")
+        root.lookupSeq++
+      }
+      return
+    }
     var parsed = Model.parseLookupLine(line)
     root.lastError = parsed.error
     if (!Model.hasContent(parsed)) return
+    root.explanation = Model.emptyExplanation()
     root.lookup = parsed
     root.lookupSeq++
   }
@@ -51,6 +68,9 @@ Item {
   }
   function lookupWord(word) { if (word) runOnce(["--lookup", String(word)]) }
   function lookupSelection() { runOnce(["--selection"]) }
+  function defineSelection() { runOnce(["--define"]) }
+  function explainSelection() { runOnce(["--explain"]) }
+  function explainText(text) { if (text) runOnce(["--explain", String(text)]) }
 
   Component.onCompleted: {
     stateReader.command = [root.watcherPath, "--state"]
@@ -109,6 +129,9 @@ Item {
     function off(): string { root.setActive(false); return "off" }
     function lookup(word: string): string { root.lookupWord(word); return "looking up" }
     function lookupSelection(): string { root.lookupSelection(); return "looking up" }
+    function defineSelection(): string { root.defineSelection(); return "defining" }
+    function explainSelection(): string { root.explainSelection(); return "explaining" }
+    function explain(text: string): string { root.explainText(text); return "explaining" }
     function status(): string {
       return JSON.stringify({
         active: root.active,
@@ -117,7 +140,8 @@ Item {
         lookup: { query: root.lookup.query, word: root.lookup.word, via: root.lookup.via,
                   found: root.lookup.found, suggestions: root.lookup.suggestions.length,
                   lemma: root.lookup.lemma ? root.lookup.lemma.word : "" },
-        card: Model.buildCard(root.lookup)
+        card: Model.buildCard(root.lookup),
+        explanation: root.explanation
       })
     }
   }

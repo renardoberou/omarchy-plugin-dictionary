@@ -24,6 +24,9 @@ Item {
   readonly property var lookup: svc ? svc.lookup : Model.parseLookupLine("")
   readonly property var cardModel: Model.buildCard(lookup, { maxSenses: 6, perSection: 3 })
   readonly property string dictName: lookup.entries.length ? lookup.entries[0].dict : ""
+  readonly property var explanation: svc ? svc.explanation : Model.emptyExplanation()
+  // Showing the local model's interpretation instead of dictionary senses.
+  readonly property bool explaining: explanation.active
 
   property bool cardVisible: false
 
@@ -35,16 +38,31 @@ Item {
   Connections {
     target: root.svc
     function onLookupSeqChanged() {
-      dismissTimer.interval = Model.dismissMs(root.cardModel)
       root.cardVisible = true
+      if (root.explaining && !root.explanation.done) { dismissTimer.stop(); return }
+      dismissTimer.interval = root.explaining ? Model.explainDismissMs(root.explanation)
+                                              : Model.dismissMs(root.cardModel)
       dismissTimer.restart()
+    }
+    // Streaming: keep the card up while the model writes, then give the
+    // reader time proportional to what it wrote.
+    function onExplanationChanged() {
+      if (!root.explaining || !root.cardVisible) return
+      if (root.explanation.done) {
+        dismissTimer.interval = Model.explainDismissMs(root.explanation)
+        dismissTimer.restart()
+      } else {
+        dismissTimer.stop()
+      }
     }
   }
 
   // The monitor under the pointer, and the pointer relative to it.
-  readonly property var where: Model.screenAt(Quickshell.screens, lookup.x, lookup.y)
+  readonly property var where: explaining
+    ? Model.screenAt(Quickshell.screens, explanation.x, explanation.y)
+    : Model.screenAt(Quickshell.screens, lookup.x, lookup.y)
 
-  readonly property bool showing: cardVisible && Model.hasContent(lookup)
+  readonly property bool showing: cardVisible && (explaining || Model.hasContent(lookup))
 
   PanelWindow {
     id: panel
@@ -101,7 +119,9 @@ Item {
           Text {
             id: titleText
             textFormat: Text.PlainText
-            text: root.cardModel.title
+            text: root.explaining
+              ? (Model.explainTitle(root.explanation.query, 60) || "Dictionary")
+              : root.cardModel.title
             width: Math.min(implicitWidth, parent.width - noteText.width - parent.spacing)
             elide: Text.ElideRight
             color: Color.popups.text
@@ -113,7 +133,7 @@ Item {
           Text {
             id: noteText
             textFormat: Text.PlainText
-            visible: !!root.cardModel.note
+            visible: !root.explaining && !!root.cardModel.note
             text: root.cardModel.note
             anchors.baseline: titleText.baseline
             color: Qt.darker(Color.popups.text, 1.4)
@@ -122,8 +142,35 @@ Item {
           }
         }
 
+        // ---- local model interpretation ------------------------------------
         Text {
-          visible: !!root.cardModel.error || !!root.cardModel.empty
+          visible: root.explaining
+          textFormat: Text.PlainText
+          text: "Interpretation" + (root.explanation.model ? " · " + Model.modelLabel(root.explanation.model) : "") + " · local model"
+          width: parent.width
+          elide: Text.ElideRight
+          color: Color.accent
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+          font.italic: true
+        }
+
+        Text {
+          visible: root.explaining
+          textFormat: Text.PlainText
+          text: root.explanation.error
+            ? root.explanation.message || "The local model couldn't answer."
+            : (root.explanation.text || "Interpreting…") + (root.explanation.done || !root.explanation.text ? "" : " ▍")
+          width: parent.width
+          wrapMode: Text.Wrap
+          color: root.explanation.error || !root.explanation.text ? Qt.darker(Color.popups.text, 1.3) : Color.popups.text
+          font.family: Style.font.family
+          font.pixelSize: Style.font.bodySmall
+        }
+
+        // ---- dictionary --------------------------------------------------
+        Text {
+          visible: !root.explaining && (!!root.cardModel.error || !!root.cardModel.empty)
           textFormat: Text.PlainText
           text: root.cardModel.error || root.cardModel.empty
           width: parent.width
@@ -134,7 +181,7 @@ Item {
         }
 
         Text {
-          visible: root.cardModel.suggestions.length > 0
+          visible: !root.explaining && root.cardModel.suggestions.length > 0
           textFormat: Text.PlainText
           text: "Did you mean: " + root.cardModel.suggestions.join(", ")
           width: parent.width
@@ -146,7 +193,7 @@ Item {
 
         // "simple past of go" -- then what "go" means
         Text {
-          visible: !!root.cardModel.lemmaTitle
+          visible: !root.explaining && !!root.cardModel.lemmaTitle
           textFormat: Text.PlainText
           text: root.cardModel.lemmaTitle
           width: parent.width
@@ -158,7 +205,7 @@ Item {
         }
 
         Repeater {
-          model: root.cardModel.lemmaBlocks.concat(root.cardModel.blocks)
+          model: root.explaining ? [] : root.cardModel.lemmaBlocks.concat(root.cardModel.blocks)
 
           delegate: Column {
             required property var modelData
@@ -195,7 +242,7 @@ Item {
         }
 
         Text {
-          visible: root.cardModel.hidden > 0 || !!root.dictName
+          visible: !root.explaining && (root.cardModel.hidden > 0 || !!root.dictName)
           textFormat: Text.PlainText
           text: (root.cardModel.hidden > 0 ? "+" + root.cardModel.hidden + " more senses" : "") +
                 (root.cardModel.hidden > 0 && root.dictName ? " · " : "") + root.dictName

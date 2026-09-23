@@ -127,3 +127,33 @@ test("dismiss time scales with length, within bounds", () => {
   assert.equal(M.dismissMs({ blocks: [], lemmaBlocks: [] }), 4000)
   assert.ok(M.dismissMs(card("went")) <= 15000)
 })
+
+test("explain lines parse; other lines are not explanations", () => {
+  const e = M.parseExplainLine('{"kind":"explain","query":"break a leg","model":"qwen2.5:3b-instruct","text":" Good luck. ","done":true,"x":5,"y":6}')
+  assert.equal(e.active, true)
+  assert.equal(e.text, "Good luck.")
+  assert.equal(e.done, true)
+  assert.equal(M.parseExplainLine('{"query":"cat","found":true}'), null)
+  assert.equal(M.parseExplainLine("garbage"), null)
+})
+
+test("explain errors count as done and carry a message", () => {
+  const e = M.parseExplainLine('{"kind":"explain","error":"no-ollama","message":"Local model not available"}')
+  assert.equal(e.done, true)
+  assert.equal(e.error, "no-ollama")
+  assert.match(e.message, /Local model/)
+})
+
+test("explain titles are shortened at a word boundary", () => {
+  assert.equal(M.explainTitle("break a leg"), "break a leg")
+  const t = M.explainTitle("Ceteris paribus, demand falls as price rises and supply grows", 30)
+  assert.ok(t.length <= 30 && t.endsWith("…"))
+  assert.doesNotMatch(t, /\s…$/)
+})
+
+test("model label and dismiss time", () => {
+  assert.equal(M.modelLabel("qwen2.5:3b-instruct"), "qwen2.5 3b")
+  assert.equal(M.modelLabel("llama3.2:latest"), "llama3.2")
+  assert.equal(M.explainDismissMs({ text: "" }), 5000)
+  assert.ok(M.explainDismissMs({ text: "x".repeat(2000) }) <= 20000)
+})

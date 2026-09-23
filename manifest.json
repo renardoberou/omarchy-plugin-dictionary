@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "renardoberou.dictionary",
   "name": "Dictionary",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "Bernardo Roustand",
   "license": "MIT",
-  "description": "Offline dictionary: highlight a word anywhere (or press a key) for a clean definition card next to the pointer. Resolves inflections (went -> go), suggests spellings, never shows another word's definition.",
+  "description": "Offline dictionary with optional local-model interpretations: highlight a word (or press a key) for a clean definition next to the pointer; phrases and sentences are explained by a small model on your machine via Ollama, clearly labelled.",
   "kinds": [
     "service",
     "bar-widget",
