@@ -191,6 +191,56 @@ Item {
           font.pixelSize: Style.font.bodySmall
         }
 
+        // A phrase with no entry: each of its words, briefly.
+        Repeater {
+          model: root.explaining ? [] : root.cardModel.parts
+
+          delegate: Column {
+            required property var modelData
+            width: column.width
+            spacing: Style.space(2)
+
+            Text {
+              textFormat: Text.PlainText
+              text: modelData.title + (modelData.note ? "  ·  " + modelData.note : "")
+              width: parent.width
+              elide: Text.ElideRight
+              color: Color.popups.text
+              font.family: Style.font.family
+              font.pixelSize: Style.font.bodySmall
+              font.bold: true
+            }
+
+            Repeater {
+              model: modelData.blocks
+              delegate: Text {
+                required property var modelData
+                textFormat: Text.PlainText
+                text: (modelData.heading ? modelData.heading + " · " : "") + modelData.senses.join(" · ")
+                width: column.width
+                wrapMode: Text.Wrap
+                maximumLineCount: 2
+                elide: Text.ElideRight
+                color: Color.popups.text
+                font.family: Style.font.family
+                font.pixelSize: Style.font.bodySmall
+              }
+            }
+          }
+        }
+
+        Text {
+          visible: !root.explaining && !!root.cardModel.hint
+          textFormat: Text.PlainText
+          text: root.cardModel.hint
+          width: parent.width
+          wrapMode: Text.Wrap
+          color: Qt.darker(Color.popups.text, 1.5)
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+          font.italic: true
+        }
+
         // "simple past of go" -- then what "go" means
         Text {
           visible: !root.explaining && !!root.cardModel.lemmaTitle

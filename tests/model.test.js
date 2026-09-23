@@ -157,3 +157,18 @@ test("model label and dismiss time", () => {
   assert.equal(M.explainDismissMs({ text: "" }), 5000)
   assert.ok(M.explainDismissMs({ text: "x".repeat(2000) }) <= 20000)
 })
+
+test("a phrase with no entry shows each word (premium subscribers)", () => {
+  const c = card("premium-subscribers")
+  assert.equal(c.empty, "No entry for the whole phrase. Its words:")
+  assert.deepEqual(c.parts.map(p => p.title), ["premium", "subscribers"])
+  assert.equal(c.parts[1].note, "plural of subscriber")
+  assert.ok(c.parts.every(p => p.blocks.length > 0))
+  assert.match(c.hint, /local model/)
+  assert.deepEqual(c.suggestions, [])
+})
+
+test("no model hint when the local model isn't available", () => {
+  const lk = sample("premium-subscribers"); lk.canExplain = false
+  assert.equal(M.buildCard(lk).hint, "")
+})

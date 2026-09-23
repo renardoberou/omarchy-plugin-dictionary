@@ -199,6 +199,24 @@ lookup() {  # $1 query -> JSON line on stdout
     [[ -n "$suggestions" ]] || suggestions="[]"
   fi
 
+  # A phrase with no entry of its own ("premium subscribers"): look up its
+  # words one by one, so the card can still say what each part means.
+  local parts="[]" part can_explain=false
+  if ! nonempty "$entries" && [[ "$query" == *" "* && -z "${DICT_NO_PARTS:-}" ]]; then
+    local -a pw
+    read -r -a pw <<<"$query"
+    parts="$(for part in "${pw[@]}"; do DICT_NO_PARTS=1 lookup "$part"; done | jq -s -c '[.[] | select(.found) | del(.x, .y)]')"
+    [[ -n "$parts" ]] || parts="[]"
+  fi
+  # On a miss, tell the card whether the local model could explain it
+  # instead (the Define key). Cheap: Ollama answers /api/tags in ~ms.
+  if ! nonempty "$entries" && [[ -z "${DICT_NO_PARTS:-}" ]]; then
+    local url; url="$(ollama_url)"
+    if { loopback "$url" || [[ "${OMARCHY_DICT_ALLOW_REMOTE:-}" == 1 ]]; } && [[ -n "$(pick_model "$url")" ]]; then
+      can_explain=true
+    fi
+  fi
+
   local pos x y
   pos="$(hyprctl cursorpos 2>/dev/null)"
   x="${pos%%,*}"; y="${pos##*, }"
@@ -207,9 +225,11 @@ lookup() {  # $1 query -> JSON line on stdout
 
   jq -nc --arg q "$query" --arg w "$word" --arg via "$via" \
     --argjson entries "$entries" --argjson lemma "$lemma_json" --argjson sugg "$suggestions" \
+    --argjson parts "$parts" --argjson canExplain "$can_explain" \
     --argjson x "$x" --argjson y "$y" \
     '{query: $q, word: $w, via: $via, entries: $entries, lemma: $lemma,
-      suggestions: $sugg, found: (($entries | length) > 0), x: $x, y: $y}'
+      suggestions: $sugg, parts: $parts, canExplain: $canExplain,
+      found: (($entries | length) > 0), x: $x, y: $y}'
 }
 
 # Trim, collapse whitespace and strip surrounding punctuation/quotes.

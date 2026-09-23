@@ -18,6 +18,8 @@ check "word looked up"              "handle quixotic | jq -e '.found and .word =
 check "punctuation stripped"        "handle '“Stopped,”' | jq -e '.query == \"Stopped\"' >/dev/null"
 check "capitalised falls back"      "handle Hello | jq -e '.via == \"lowercase\" and .word == \"hello\"' >/dev/null"
 check "two-word phrase"             "handle 'ice cream' | jq -e '.found' >/dev/null"
+check "phrase without entry lists its words" \
+  "handle 'Premium subscribers' | jq -e '(.found | not) and ([.parts[].word] == [\"premium\", \"subscribers\"])' >/dev/null"
 check "inflection follows to lemma" "handle went | jq -e '.lemma.word == \"go\"' >/dev/null"
 check "miss has suggestions, no entries" \
   "handle serendipty | jq -e '(.found | not) and (.entries | length == 0) and (.suggestions | index(\"serendipity\"))' >/dev/null"

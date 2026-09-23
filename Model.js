@@ -271,7 +271,7 @@ function rankSuggestions(query, words, max) {
 
 function emptyLookup() {
   return { query: "", word: "", via: "", entries: [], lemma: null, suggestions: [],
-           found: false, error: "", x: 0, y: 0 }
+           parts: [], canExplain: false, found: false, error: "", x: 0, y: 0 }
 }
 
 function parseEntries(list) {
@@ -309,6 +309,10 @@ function parseLookupLine(line) {
     entries: parseEntries(p.entries),
     lemma: lemma,
     suggestions: Array.isArray(p.suggestions) ? p.suggestions.map(String) : [],
+    // A phrase with no entry of its own: its words, looked up one by one.
+    parts: Array.isArray(p.parts) ? p.parts.map(function(x) { return parseLookupLine(JSON.stringify(x)) })
+                                           .filter(function(x) { return x.found }) : [],
+    canExplain: !!p.canExplain,
     found: !!p.found,
     error: typeof p.error === "string" ? p.error : "",
     x: Number(p.x) || 0,
@@ -336,7 +340,7 @@ function buildCard(lookup, opts) {
   var maxSenses = opts.maxSenses || 6
   var perSection = opts.perSection || 3
   var card = { title: "", note: "", blocks: [], lemmaTitle: "", lemmaBlocks: [],
-               suggestions: [], empty: "", error: "", hidden: 0 }
+               suggestions: [], parts: [], hint: "", empty: "", error: "", hidden: 0 }
   if (!lookup) return card
   if (lookup.error === "no-dictionary") {
     card.title = "Dictionary"
@@ -368,8 +372,22 @@ function buildCard(lookup, opts) {
   }
 
   if (!lookup.found) {
-    card.suggestions = rankSuggestions(lookup.query, lookup.suggestions, 3)
-    card.empty = "No definition found."
+    var parts = lookup.parts || []
+    if (parts.length) {
+      // "premium subscribers": no entry for the phrase, so say what each
+      // word means -- briefly, the card has to hold all of them.
+      card.empty = "No entry for the whole phrase. Its words:"
+      card.parts = parts.map(function(pt) {
+        var c = buildCard(pt, { maxSenses: 2, perSection: 2 })
+        card.hidden += c.hidden
+        return { title: c.title, note: c.lemmaTitle, blocks: c.lemmaBlocks.concat(c.blocks) }
+      })
+    } else {
+      card.suggestions = rankSuggestions(lookup.query, lookup.suggestions, 3)
+      card.empty = "No definition found."
+    }
+    if (lookup.canExplain)
+      card.hint = "Press your Define key (Super+Alt+D in the README) to have the local model explain it."
     return card
   }
 
