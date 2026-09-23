@@ -6,9 +6,32 @@ set -uo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 w="$here/../bin/omarchy-dict-watch"
 command -v sdcv >/dev/null && [[ -n "$(sdcv -l 2>/dev/null | tail -n +2)" ]] || { echo "skip: no sdcv dictionary"; exit 0; }
-export OMARCHY_DICT_RUNTIME="$(mktemp -d)"; trap 'rm -rf "$OMARCHY_DICT_RUNTIME"' EXIT
+export OMARCHY_DICT_RUNTIME="$(mktemp -d)"
 fail=0
 check() { if eval "$2"; then echo "ok   - $1"; else echo "FAIL - $1"; fail=1; fi; }
+# Tests that write to the REAL primary selection must not pop cards on the
+# user's screen: pause the plugin's auto mode (and wait until its watcher
+# process is really gone), and restore both the mode and the selection after.
+paused=""; saved_sel=""
+pause_auto() {
+  saved_sel="$(wl-paste --primary --no-newline --type text 2>/dev/null)"
+  if [[ "$(omarchy-shell renardoberou.dictionary status 2>/dev/null | jq -r '.active // false' 2>/dev/null)" == true ]]; then
+    paused=1
+    omarchy-shell -q renardoberou.dictionary off >/dev/null
+  fi
+  local i
+  for (( i = 0; i < 30; i++ )); do
+    pgrep -f 'wl-paste --primary --type text --watch .*omarchy-dict-watch' >/dev/null || break
+    sleep 0.1
+  done
+}
+resume_auto() {
+  if [[ -n "$saved_sel" ]]; then printf '%s' "$saved_sel" | wl-copy --primary; else wl-copy --primary --clear; fi
+  sleep 0.5
+  if [[ -n "$paused" ]]; then paused=""; omarchy-shell -q renardoberou.dictionary on >/dev/null; fi
+}
+trap 'resume_auto 2>/dev/null; rm -rf "$OMARCHY_DICT_RUNTIME"' EXIT
+
 handle() { printf '%s' "$1" | DICT_WATCH_STARTED=0 OMARCHY_DICT_DENY_CLASSES="${DENY:-no-such-window-class}" "$w" --handle; }
 
 for s in "https://example.com/a" "rm -rf /tmp/x" "hunter2" "The quick brown fox jumps" "a" "" "   " "foo@bar.com" "v0.2.0"; do
@@ -31,7 +54,7 @@ check "debounce: only the last of a burst" \
   "[[ \$( { handle absur & sleep 0.05; handle absurd; wait; } | grep -c . ) == 1 ]]"
 # ---- what's in the selection (uses the real primary selection) ------------
 if command -v wl-copy >/dev/null && [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
-  saved="$(wl-paste --primary --no-newline --type text 2>/dev/null)"
+  pause_auto
   printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR' | wl-copy --primary --type image/png
   check "an image in the selection is not text (was: PNG bytes sent to the model)" \
     "\"$w\" --define | jq -e '.error == \"no-word\"' >/dev/null"
@@ -43,7 +66,7 @@ if command -v wl-copy >/dev/null && [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
     "\"$w\" --define | jq -e '.error == \"no-word\"' >/dev/null"
   check "binary on the watcher path is ignored" \
     "[[ -z \"\$(printf 'ab\x01cd' | DICT_WATCH_STARTED=0 OMARCHY_DICT_DENY_CLASSES=no-such-window-class \"$w\" --handle)\" ]]"
-  if [[ -n "$saved" ]]; then printf '%s' "$saved" | wl-copy --primary; fi
+  resume_auto
 else
   echo "skip - selection tests (no Wayland session)"
 fi
@@ -54,6 +77,7 @@ check "explain: Ollama down gives no-ollama" \
 check "explain: remote host refused by default" \
   "OLLAMA_HOST=gpu-box.example.com:11434 \"$w\" --explain 'break a leg' | jq -e '.error == \"remote-host\"' >/dev/null"
 if curl -s -m 1 "http://${OLLAMA_HOST:-127.0.0.1:11434}/api/tags" | jq -e '.models | length > 0' >/dev/null 2>&1; then
+  pause_auto
   check "explain: configured model missing names it" \
     "OMARCHY_DICT_MODEL=nope:1b \"$w\" --explain 'x y' | jq -e '.error == \"no-model\" and (.message | test(\"nope:1b\"))' >/dev/null"
   check "explain: streams and finishes with text" \
@@ -62,6 +86,7 @@ if curl -s -m 1 "http://${OLLAMA_HOST:-127.0.0.1:11434}/api/tags" | jq -e '.mode
     "wl-copy --primary quixotic && [[ \$(\"$w\" --define | jq -r '.kind // \"lookup\"') == lookup ]]"
   check "define: a phrase goes to the model" \
     "wl-copy --primary 'the devil is in the details' && \"$w\" --define | tail -1 | jq -e '.kind == \"explain\"' >/dev/null"
+  resume_auto
 else
   echo "skip - live model tests (Ollama with a model not reachable)"
 fi
