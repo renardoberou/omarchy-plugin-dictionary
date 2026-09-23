@@ -45,6 +45,23 @@ state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-dictionary"
 
 log() { printf '[dict] %s\n' "$*" >&2; }  # stderr only -- stdout is the JSON stream
 
+# ---- reading the selection ----------------------------------------------
+
+# The primary selection can hold anything an app offers: an image, a file
+# list, rich text. v0.3.0 read it without asking for a type, so a selected
+# image reached the model as raw PNG bytes and the card title filled with
+# garbage. Always ask for text; if there's no text type, there's nothing.
+read_selection() {  # $1 = max bytes
+  wl-paste --primary --no-newline --type text 2>/dev/null | head -c "${1:-8192}" | tr -d '\000'
+}
+
+# Plain text only: reject anything with control bytes (binary that an app
+# mislabelled as text). Tabs and newlines are fine.
+is_text() {
+  LC_ALL=C grep -qP '[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]' <<<"$1" && return 1
+  return 0
+}
+
 # ---- lookups -------------------------------------------------------------
 
 exact() { sdcv -n -e --json-output -- "$1" 2>/dev/null; }
@@ -232,7 +249,8 @@ have_dictionary() {
 handle_one() {
   # Invoked by wl-paste --watch once per selection change, content on stdin.
   local raw query now started seq mine
-  raw="$(head -c 4096)"
+  raw="$(head -c 4096 | tr -d '\000')"
+  is_text "$raw" || return 0
 
   now="${EPOCHREALTIME/./}"
   started="${DICT_WATCH_STARTED:-0}"
@@ -371,8 +389,9 @@ explain_text() {
 define_selection() {  # $1 = "force-model" to skip the dictionary
   local raw word out
   denied_window && { echo '{"error":"denied-window"}'; return; }
-  raw="$(wl-paste --primary --no-newline 2>/dev/null | head -c 8192)"
+  raw="$(read_selection 8192)"
   [[ -n "${raw//[[:space:]]/}" ]] || { echo '{"error":"no-word"}'; return; }
+  is_text "$raw" || { echo '{"error":"not-text"}'; return; }
   word="$(normalize "$raw")"
   if [[ -n "$word" && "${1:-}" != force-model ]] && have_dictionary; then
     out="$(lookup "$word")"
@@ -390,7 +409,12 @@ case "${1:-}" in
     exit 0
     ;;
   --explain)
-    if [[ -n "${2:-}" ]]; then explain "$(explain_text "$2")"; else define_selection force-model; fi
+    if [[ -n "${2:-}" ]]; then
+      is_text "$2" || { echo '{"error":"not-text"}'; exit 0; }
+      explain "$(explain_text "$2")"
+    else
+      define_selection force-model
+    fi
     exit 0
     ;;
   --handle)
@@ -407,7 +431,7 @@ case "${1:-}" in
   --selection)
     have_dictionary || { echo '{"error":"no-dictionary"}'; exit 0; }
     denied_window && { echo '{"error":"denied-window"}'; exit 0; }
-    q="$(normalize "$(wl-paste --primary --no-newline 2>/dev/null | head -c 4096)")"
+    q="$(normalize "$(read_selection 4096)")"
     if [[ -n "$q" ]]; then lookup "$q"; else echo '{"error":"no-word"}'; fi
     exit 0
     ;;
@@ -430,4 +454,4 @@ if ! have_dictionary; then
 fi
 
 export DICT_WATCH_STARTED="${EPOCHREALTIME/./}"
-exec wl-paste --primary --watch "$0" --handle
+exec wl-paste --primary --type text --watch "$0" --handle

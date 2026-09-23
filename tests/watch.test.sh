@@ -27,6 +27,25 @@ check "denied window is skipped" \
   "[[ -z \"\$(DENY=. handle quixotic)\" ]]"
 check "debounce: only the last of a burst" \
   "[[ \$( { handle absur & sleep 0.05; handle absurd; wait; } | grep -c . ) == 1 ]]"
+# ---- what's in the selection (uses the real primary selection) ------------
+if command -v wl-copy >/dev/null && [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
+  saved="$(wl-paste --primary --no-newline --type text 2>/dev/null)"
+  printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR' | wl-copy --primary --type image/png
+  check "an image in the selection is not text (was: PNG bytes sent to the model)" \
+    "\"$w\" --define | jq -e '.error == \"no-word\"' >/dev/null"
+  printf 'abc\x01\x02def' | wl-copy --primary --type text/plain
+  check "binary labelled as text is refused" \
+    "\"$w\" --define | jq -e '.error == \"not-text\"' >/dev/null"
+  wl-copy --primary --clear
+  check "empty selection shows nothing" \
+    "\"$w\" --define | jq -e '.error == \"no-word\"' >/dev/null"
+  check "binary on the watcher path is ignored" \
+    "[[ -z \"\$(printf 'ab\x01cd' | DICT_WATCH_STARTED=0 OMARCHY_DICT_DENY_CLASSES=no-such-window-class \"$w\" --handle)\" ]]"
+  if [[ -n "$saved" ]]; then printf '%s' "$saved" | wl-copy --primary; fi
+else
+  echo "skip - selection tests (no Wayland session)"
+fi
+
 # ---- local model (Ollama) -------------------------------------------------
 check "explain: Ollama down gives no-ollama" \
   "OLLAMA_HOST=127.0.0.1:9 \"$w\" --explain 'break a leg' | jq -e '.error == \"no-ollama\"' >/dev/null"
